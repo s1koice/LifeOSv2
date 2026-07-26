@@ -42,9 +42,9 @@ export function HealthTab({ health, shealth, TD }) {
           <span style={{ flex: 1, fontSize: 12, color: C.muted }}>Спорт был</span>
           <div
             onClick={() => upd("workout")(!today.workout)}
-            style={{ width: 40, height: 22, borderRadius: 11, background: today.workout ? C.green : C.dim, position: "relative", cursor: "pointer", transition: "background .15s" }}
+            style={{ width: 51, height: 31, borderRadius: 16, background: today.workout ? C.green : C.dim, position: "relative", cursor: "pointer", transition: "background .2s" }}
           >
-            <div style={{ position: "absolute", top: 2, left: today.workout ? 20 : 2, width: 18, height: 18, borderRadius: "50%", background: "#fff", transition: "left .15s" }} />
+            <div style={{ position: "absolute", top: 2, left: today.workout ? 22 : 2, width: 27, height: 27, borderRadius: "50%", background: "#fff", boxShadow: "0 2px 4px rgba(0,0,0,.25)", transition: "left .2s" }} />
           </div>
         </div>
       </Card>
