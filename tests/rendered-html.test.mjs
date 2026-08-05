@@ -55,3 +55,18 @@ test("ships the iOS interaction layer and secure server-side AI route", async ()
   assert.match(route, /OPENAI_API_KEY/);
   assert.match(route, /responses\.create/);
 });
+
+test("keeps calendar entries on real dates and habits readable on mobile", async () => {
+  const [page, ios] = await Promise.all([
+    source("app/page.tsx"),
+    source("app/ios.css"),
+  ]);
+
+  assert.match(page, /function normalizeCalendarEvents/);
+  assert.match(page, /planningFocuses/);
+  assert.match(page, /task-calendar-event/);
+  assert.match(page, /onClick=\{\(\)=>navigate\("Обзор"\)\}/);
+  assert.match(ios, /\.breadcrumbs button/);
+  assert.match(ios, /\.habit-week-row\{min-width:0!important/);
+  assert.match(ios, /grid-template-columns:repeat\(7,minmax\(0,1fr\)\)/);
+});
