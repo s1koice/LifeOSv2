@@ -70,3 +70,42 @@ test("keeps calendar entries on real dates and habits readable on mobile", async
   assert.match(ios, /\.habit-week-row\{min-width:0!important/);
   assert.match(ios, /grid-template-columns:repeat\(7,minmax\(0,1fr\)\)/);
 });
+
+test("adds financial obligations calendar and calendar planning modes", async () => {
+  const [page, ios] = await Promise.all([
+    source("app/page.tsx"),
+    source("app/ios.css"),
+  ]);
+
+  assert.match(page, /function FinanceCalendar/);
+  assert.match(page, /Списания и кредитные платежи/);
+  assert.match(page, /kind==="installment"/);
+  assert.match(page, /type CalendarView="day"\|"week"\|"month"/);
+  assert.match(page, /\["day","День"\]/);
+  assert.match(page, /text\/nexus-task/);
+  assert.match(page, /onDrop=/);
+  assert.match(page, /startTouchDrag/);
+  assert.match(page, /data-calendar-date/);
+  assert.match(ios, /\.finance-calendar-grid/);
+  assert.match(ios, /\.month-calendar-grid/);
+  assert.match(ios, /\.calendar-view-switch/);
+  assert.match(ios, /touch-action:none/);
+});
+
+test("supports voice inbox and goal progress driven by linked projects", async () => {
+  const [page, ios] = await Promise.all([
+    source("app/page.tsx"),
+    source("app/ios.css"),
+  ]);
+
+  assert.match(page, /SpeechRecognition/);
+  assert.match(page, /recognition\.lang="ru-RU"/);
+  assert.match(page, /className=\{`voice-capture/);
+  assert.match(page, /projectIds\?: number\[\]/);
+  assert.match(page, /function goalProgressValue/);
+  assert.match(page, /toggleProject/);
+  assert.match(page, /\["МЕСЯЦ","НЕДЕЛЯ","СЕГОДНЯ"\]/);
+  assert.match(ios, /\.voice-capture\.listening/);
+  assert.match(ios, /\.goal-focus-board/);
+  assert.match(ios, /\.goal-link-panel/);
+});
