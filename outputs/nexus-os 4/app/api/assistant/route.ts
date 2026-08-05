@@ -5,10 +5,10 @@ export const runtime = "nodejs";
 type Action = { type: string; payload: Record<string, unknown> };
 
 const SYSTEM = `Ты — исполнительный персональный ассистент NEXUS AI. Отвечай по-русски, кратко и по делу.
-Главное правило: если пользователь просит создать, добавить, завершить или изменить сущность, вызывай подходящий инструмент сразу. Не спрашивай подтверждение и не задавай уточняющие вопросы, если можно выбрать разумное значение по умолчанию. Для времени используй «Сегодня», для сферы — наиболее подходящую сферу из контекста или «Личное», для приоритета — medium, для срока — «Без срока». Если пользователь упоминает существующий проект, обязательно передай его название в поле project; иначе передай пустую строку. Если в одном сообщении несколько задач, вызови create_task для каждой. После действий сообщи одним коротким предложением, что выполнено. Пользователь предпочитает потом исправить результат сам.`;
+Главное правило: если пользователь просит создать, добавить, завершить или изменить сущность, вызывай подходящий инструмент сразу. Не спрашивай подтверждение и не задавай уточняющие вопросы, если можно выбрать разумное значение по умолчанию. Для времени используй «Сегодня», для сферы — «Личное», для приоритета — medium, для срока — «Без срока». Если в одном сообщении несколько задач, вызови create_task для каждой. После действий сообщи одним коротким предложением, что выполнено. Пользователь предпочитает потом исправить результат сам.`;
 
 const tools: OpenAI.Responses.Tool[] = [
-  { type: "function", name: "create_task", description: "Немедленно добавить задачу в общий список и при необходимости связать с существующим проектом", strict: true, parameters: { type: "object", properties: { title: { type: "string" }, area: { type: "string" }, time: { type: "string" }, priority: { type: "string", enum: ["high", "medium", "low"] }, project: { type: "string", description: "Название существующего проекта или пустая строка" } }, required: ["title", "area", "time", "priority", "project"], additionalProperties: false } },
+  { type: "function", name: "create_task", description: "Немедленно добавить задачу в список пользователя", strict: true, parameters: { type: "object", properties: { title: { type: "string" }, area: { type: "string" }, time: { type: "string" }, priority: { type: "string", enum: ["high", "medium", "low"] } }, required: ["title", "area", "time", "priority"], additionalProperties: false } },
   { type: "function", name: "complete_task", description: "Отметить существующую задачу выполненной по названию", strict: true, parameters: { type: "object", properties: { title: { type: "string" } }, required: ["title"], additionalProperties: false } },
   { type: "function", name: "create_project", description: "Немедленно создать проект", strict: true, parameters: { type: "object", properties: { name: { type: "string" }, area: { type: "string" }, due: { type: "string" }, next: { type: "string" } }, required: ["name", "area", "due", "next"], additionalProperties: false } },
   { type: "function", name: "create_goal", description: "Немедленно создать цель", strict: true, parameters: { type: "object", properties: { title: { type: "string" }, period: { type: "string", enum: ["ГОД", "КВАРТАЛ", "МЕСЯЦ", "НЕДЕЛЯ", "СЕГОДНЯ"] }, date: { type: "string" }, note: { type: "string" } }, required: ["title", "period", "date", "note"], additionalProperties: false } },
@@ -20,7 +20,7 @@ function parseOfflineActions(message: string): Action[] {
   if (!/(добав|созда|запиш|постав)/i.test(normalized)) return [];
   const taskMatch = normalized.match(/(?:задач[ауи]?|сделать)\s*[:—-]?\s*(.+)/i);
   if (!taskMatch) return [];
-  return taskMatch[1].split(/\s*(?:,|;|\n|\s+и\s+)\s*/).filter(Boolean).map((title, index) => ({ type: "create_task", payload: { title: title.replace(/[.!]+$/, ""), area: "Личное", time: "Сегодня", priority: index === 0 ? "high" : "medium", project: "" } }));
+  return taskMatch[1].split(/\s*(?:,|;|\n|\s+и\s+)\s*/).filter(Boolean).map((title, index) => ({ type: "create_task", payload: { title: title.replace(/[.!]+$/, ""), area: "Личное", time: "Сегодня", priority: index === 0 ? "high" : "medium" } }));
 }
 
 export async function POST(request: Request) {
