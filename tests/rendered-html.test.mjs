@@ -133,3 +133,61 @@ test("supports a reorderable dashboard, light iOS theme and live gamification", 
   assert.match(ios, /\.game-card/);
   assert.match(ios, /\.theme-light/);
 });
+
+test("adds Supabase auth, RLS-protected cloud sync and local fallback", async () => {
+  const [page, client, migration, env] = await Promise.all([
+    source("app/page.tsx"),
+    source("lib/supabase-rest.ts"),
+    source("supabase/migrations/001_nexus_user_state.sql"),
+    source(".env.example"),
+  ]);
+
+  assert.match(page, /function AuthPanel/);
+  assert.match(page, /loadCloudState/);
+  assert.match(page, /saveCloudState/);
+  assert.match(client, /auth\/v1\/token\?grant_type=password/);
+  assert.match(client, /auth\/v1\/token\?grant_type=refresh_token/);
+  assert.match(client, /rest\/v1\/nexus_user_state/);
+  assert.match(migration, /enable row level security/);
+  assert.match(migration, /\(select auth\.uid\(\)\) = user_id/);
+  assert.match(env, /NEXT_PUBLIC_SUPABASE_URL/);
+  assert.match(env, /NEXT_PUBLIC_SUPABASE_ANON_KEY/);
+});
+
+test("ships the smart day center, PARA wizard and richer task planning", async () => {
+  const [page, ios] = await Promise.all([
+    source("app/page.tsx"),
+    source("app/ios.css"),
+  ]);
+
+  assert.match(page, /УМНЫЙ ЦЕНТР ДНЯ/);
+  assert.match(page, /function ParaReviewWizard/);
+  assert.match(page, /ПОШАГОВЫЙ ОБЗОР PARA/);
+  assert.match(page, /type TaskEnergy/);
+  assert.match(page, /duration\?: number/);
+  assert.match(page, /context\?: TaskContext/);
+  assert.match(page, /name="duration"/);
+  assert.match(page, /name="energy"/);
+  assert.match(page, /name="context"/);
+  assert.match(ios, /\.smart-day-center/);
+  assert.match(ios, /\.para-wizard/);
+});
+
+test("adds automatic AI planning with undo and a month-end finance forecast", async () => {
+  const [page, route, ios] = await Promise.all([
+    source("app/page.tsx"),
+    source("app/api/assistant/route.ts"),
+    source("app/ios.css"),
+  ]);
+
+  assert.match(page, /captureUndo/);
+  assert.match(page, /undoLastAiAction/);
+  assert.match(page, /Отменить последнее изменение AI/);
+  assert.match(route, /name: "update_task"/);
+  assert.match(route, /продолжительность в минутах/);
+  assert.match(page, /function FinanceForecast/);
+  assert.match(page, /ПРОГНОЗ ДО КОНЦА МЕСЯЦА/);
+  assert.match(page, /БЕЗОПАСНО В ДЕНЬ/);
+  assert.match(ios, /\.assistant-undo/);
+  assert.match(ios, /\.finance-forecast/);
+});
