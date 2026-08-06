@@ -109,3 +109,27 @@ test("supports voice inbox and goal progress driven by linked projects", async (
   assert.match(ios, /\.goal-focus-board/);
   assert.match(ios, /\.goal-link-panel/);
 });
+
+test("supports a reorderable dashboard, light iOS theme and live gamification", async () => {
+  const [page, globals, ios] = await Promise.all([
+    source("app/page.tsx"),
+    source("app/globals.css"),
+    source("app/ios.css"),
+  ]);
+
+  assert.match(page, /type DashboardBlockId/);
+  assert.match(page, /defaultDashboardOrder/);
+  assert.match(page, /data-dashboard-widget/);
+  assert.match(page, /text\/nexus-dashboard/);
+  assert.match(page, /dashboardOrder, gamification/);
+  assert.match(page, /type Theme = "lime" \| "orbit" \| "light"/);
+  assert.match(page, /Светлая iOS/);
+  assert.match(page, /function addGameEvents/);
+  assert.match(page, /missed-deadline/);
+  assert.match(page, /inactive-day/);
+  assert.match(page, /Ритм снизился относительно прошлого периода/);
+  assert.match(globals, /\.light-preview/);
+  assert.match(ios, /\.dashboard-board/);
+  assert.match(ios, /\.game-card/);
+  assert.match(ios, /\.theme-light/);
+});

@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
 type Section = "Обзор" | "Задачи" | "Цели" | "Проекты" | "Привычки" | "Финансы" | "Здоровье" | "Планирование" | "Журнал" | "Настройки";
 type Priority = "high" | "medium" | "low";
@@ -28,6 +28,31 @@ type AssistantAction = { type: string; payload: Record<string, unknown> };
 type SpeechResultEvent = { results: { [index: number]: { [index: number]: { transcript: string } } } };
 type SpeechRecognitionLike = { lang: string; interimResults: boolean; continuous: boolean; start: () => void; stop: () => void; onresult: ((event: SpeechResultEvent) => void) | null; onerror: (() => void) | null; onend: (() => void) | null };
 type SpeechRecognitionConstructor = new () => SpeechRecognitionLike;
+type Theme = "lime" | "orbit" | "light";
+type DashboardBlockId = "focus" | "tracker" | "today" | "compass" | "habits" | "goals" | "projects" | "reflection" | "game";
+type GameEvent = { id: number; key: string; date: string; delta: number; title: string; category: "action" | "completion" | "rhythm" | "penalty" };
+type GameDay = { date: string; score: number; actions: number };
+type GamificationState = { xp: number; events: GameEvent[]; activeDays: string[]; dailyScores: GameDay[] };
+type GameEventDraft = Omit<GameEvent, "id" | "date"> & { date?: string };
+type GameSnapshot = {
+  today: string;
+  tasks: Record<string, { done: boolean; priority: Priority }>;
+  habits: Record<string, boolean>;
+  projects: number[];
+  goals: number[];
+  inbox: number[];
+  resources: number[];
+  events: number[];
+  journals: number[];
+  health: number[];
+  transactions: Record<string, { kind: FinanceKind; posted: boolean; recurring: boolean }>;
+  milestones: Record<string, boolean>;
+  focuses: string[];
+};
+
+const defaultDashboardOrder: DashboardBlockId[] = ["focus", "game", "tracker", "today", "compass", "habits", "goals", "projects", "reflection"];
+const seedGamification: GamificationState = { xp: 2840, events: [], activeDays: [], dailyScores: [] };
+const gameBlockLabels: Record<DashboardBlockId, string> = { focus: "Фокус дня", game: "Уровень и XP", tracker: "Трекер", today: "Задачи", compass: "Компас", habits: "Привычки", goals: "Цели", projects: "Проекты", reflection: "Разбор дня" };
 
 const nav: { group: string; items: { label: Section; icon: string }[] }[] = [
   { group: "Пространство", items: [{ label: "Обзор", icon: "◈" }, { label: "Задачи", icon: "✓" }, { label: "Цели", icon: "◎" }, { label: "Проекты", icon: "▦" }] },
@@ -188,6 +213,51 @@ function goalProgressValue(goal: Goal, projects: Project[], tasks: Task[]) {
   return Math.round(linked.reduce((sum, project) => sum + projectProgressValue(project, tasks), 0) / linked.length);
 }
 
+function normalizeDashboardOrder(raw: unknown): DashboardBlockId[] {
+  const allowed = new Set<DashboardBlockId>(defaultDashboardOrder);
+  const stored = Array.isArray(raw) ? raw.filter((item): item is DashboardBlockId => typeof item === "string" && allowed.has(item as DashboardBlockId)) : [];
+  return [...new Set(stored), ...defaultDashboardOrder.filter(item => !stored.includes(item))];
+}
+
+function normalizeGamification(raw: unknown): GamificationState {
+  if (!raw || typeof raw !== "object") return seedGamification;
+  const value = raw as Partial<GamificationState>;
+  return {
+    xp: Number.isFinite(value.xp) ? Math.max(0, Number(value.xp)) : seedGamification.xp,
+    events: Array.isArray(value.events) ? value.events.slice(0, 500) : [],
+    activeDays: Array.isArray(value.activeDays) ? value.activeDays.filter(item => typeof item === "string").slice(-120) : [],
+    dailyScores: Array.isArray(value.dailyScores) ? value.dailyScores.slice(-60) : [],
+  };
+}
+
+function gameLevel(xp: number) {
+  const step = 250;
+  const safeXp = Math.max(0, Math.round(xp));
+  const level = Math.floor(safeXp / step) + 1;
+  const current = safeXp % step;
+  return { level, current, step, progress: Math.round(current / step * 100), remaining: step - current };
+}
+
+function gameStreak(activeDays: string[]) {
+  const days = new Set(activeDays);
+  const cursor = new Date();
+  if (!days.has(localDateKey(cursor))) cursor.setDate(cursor.getDate() - 1);
+  let streak = 0;
+  while (days.has(localDateKey(cursor))) { streak += 1; cursor.setDate(cursor.getDate() - 1); }
+  return streak;
+}
+
+function addGameEvents(current: GamificationState, drafts: GameEventDraft[]) {
+  const known = new Set(current.events.map(event => event.key));
+  const fresh = drafts.filter(draft => { if (known.has(draft.key)) return false; known.add(draft.key); return true; });
+  if (!fresh.length) return current;
+  const today = localDateKey(new Date());
+  const events = fresh.map((draft, index): GameEvent => ({ ...draft, id: newEntityId() + index, date: draft.date || today }));
+  const activeDays = new Set(current.activeDays);
+  events.filter(event => event.delta > 0).forEach(event => activeDays.add(event.date));
+  return { ...current, xp: Math.max(0, current.xp + events.reduce((sum, event) => sum + event.delta, 0)), events: [...events, ...current.events].slice(0, 500), activeDays: [...activeDays].sort().slice(-120) };
+}
+
 function settleDueInstallments(accounts: Account[], entries: Transaction[]) {
   const today = localDateKey(new Date());
   const nextAccounts = accounts.map(a => ({ ...a }));
@@ -240,7 +310,7 @@ function normalizeHabits(raw: unknown, storedHistory: HabitHistory[]) {
 }
 
 function Ring({ value, color, size = 70 }: { value: number; color: string; size?: number }) {
-  return <div className="ring" style={{ width: size, height: size, background: `conic-gradient(${color} ${Math.max(0, Math.min(100, value)) * 3.6}deg, #262a30 0deg)` }}><div><strong>{value}</strong><small>%</small></div></div>;
+  return <div className="ring" style={{ width: size, height: size, background: `conic-gradient(${color} ${Math.max(0, Math.min(100, value)) * 3.6}deg, var(--ring-track,#262a30) 0deg)` }}><div><strong>{value}</strong><small>%</small></div></div>;
 }
 
 function IconButton({ children, label, onClick }: { children: React.ReactNode; label: string; onClick?: () => void }) {
@@ -271,7 +341,9 @@ export default function Home() {
   const [taskProjectId, setTaskProjectId] = useState<number | null>(null);
   const [selectedProjectId, setSelectedProjectId] = useState<number | null>(null);
   const [editingHabit, setEditingHabit] = useState<Habit | null>(null);
-  const [theme, setTheme] = useState<"lime" | "orbit">("lime");
+  const [theme, setTheme] = useState<Theme>("lime");
+  const [dashboardOrder, setDashboardOrder] = useState<DashboardBlockId[]>(defaultDashboardOrder);
+  const [gamification, setGamification] = useState<GamificationState>(seedGamification);
   const [assistantOpen, setAssistantOpen] = useState(false);
   const [mobileNav, setMobileNav] = useState(false);
   const [messages, setMessages] = useState<{ role: "assistant" | "user"; text: string }[]>([{ role: "assistant", text: "Скажите, что нужно сделать. Я сразу добавлю задачи, цели или проекты в NEXUS — без лишних вопросов." }]);
@@ -282,6 +354,7 @@ export default function Home() {
   const [search, setSearch] = useState("");
   const [loaded, setLoaded] = useState(false);
   const [, setClockTick] = useState(0);
+  const gameSnapshotRef = useRef<GameSnapshot | null>(null);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -307,9 +380,12 @@ export default function Home() {
         else if (typeof parsed.planningNote === "string" && parsed.planningNote) setPlanningFocuses({ [localDateKey(startOfWeek(new Date()))]: parsed.planningNote });
         if (Array.isArray(parsed.healthNotes)) setHealthNotes(uniqueEntityIds(parsed.healthNotes));
         if (Array.isArray(parsed.journalEntries)) setJournalEntries(uniqueEntityIds(parsed.journalEntries));
+        setDashboardOrder(normalizeDashboardOrder(parsed.dashboardOrder));
+        setGamification(normalizeGamification(parsed.gamification));
       } catch { /* keep demo data */ }
       setByok(localStorage.getItem("nexus-byok") || "");
-      setTheme(localStorage.getItem("nexus-theme") === "orbit" ? "orbit" : "lime");
+      const storedTheme = localStorage.getItem("nexus-theme");
+      setTheme(storedTheme === "orbit" || storedTheme === "light" ? storedTheme : "lime");
       const hashSection = decodeURIComponent(window.location.hash.slice(1)) as Section;
       if (nav.some(group => group.items.some(item => item.label === hashSection))) setSection(hashSection);
       setLoaded(true);
@@ -318,8 +394,8 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    if (loaded) localStorage.setItem("nexus-state", JSON.stringify({ tasks, projects, inboxItems, resources, goals, habits, lifeAreas, financeCategories, budgetLines, recurringExpenses, habitHistory, accounts, transactions, events, planningFocuses, planningNote: planningFocuses[localDateKey(startOfWeek(new Date()))] || "", healthNotes, journalEntries }));
-  }, [loaded, tasks, projects, inboxItems, resources, goals, habits, lifeAreas, financeCategories, budgetLines, recurringExpenses, habitHistory, accounts, transactions, events, planningFocuses, healthNotes, journalEntries]);
+    if (loaded) localStorage.setItem("nexus-state", JSON.stringify({ tasks, projects, inboxItems, resources, goals, habits, lifeAreas, financeCategories, budgetLines, recurringExpenses, habitHistory, accounts, transactions, events, planningFocuses, planningNote: planningFocuses[localDateKey(startOfWeek(new Date()))] || "", healthNotes, journalEntries, dashboardOrder, gamification }));
+  }, [loaded, tasks, projects, inboxItems, resources, goals, habits, lifeAreas, financeCategories, budgetLines, recurringExpenses, habitHistory, accounts, transactions, events, planningFocuses, healthNotes, journalEntries, dashboardOrder, gamification]);
 
   useEffect(() => {
     if (!loaded) return;
@@ -361,9 +437,75 @@ export default function Home() {
   const taskCompletion = useMemo(() => tasks.length ? Math.round(tasks.filter(t => t.done).length / tasks.length * 100) : 0, [tasks]);
   const clock = habitClock();
   const habitCompletion = habits.length ? Math.round(habits.filter(h => h.checks[clock.today]).length / habits.length * 100) : 0;
+  const levelInfo = gameLevel(gamification.xp);
+
+  useEffect(() => {
+    if (!loaded) return;
+    const activeClock = habitClock();
+    const next: GameSnapshot = {
+      today: activeClock.today,
+      tasks: Object.fromEntries(tasks.map(task => [String(task.id), { done: task.done, priority: task.priority }])),
+      habits: Object.fromEntries(habits.map(habit => [String(habit.id), Boolean(habit.checks[activeClock.today])])),
+      projects: projects.map(project => project.id), goals: goals.map(goal => goal.id), inbox: inboxItems.map(item => item.id), resources: resources.map(item => item.id), events: events.map(item => item.id), journals: journalEntries.map(item => item.id), health: healthNotes.map(item => item.id),
+      transactions: Object.fromEntries(transactions.map(item => [String(item.id), { kind: item.kind, posted: Boolean(item.posted), recurring: Boolean(item.recurringId) }])),
+      milestones: Object.fromEntries(projects.flatMap(project => (project.milestones || []).map(item => [`${project.id}-${item.id}`, item.done]))),
+      focuses: Object.entries(planningFocuses).filter(([, value]) => value.trim()).map(([key]) => key),
+    };
+    const previous = gameSnapshotRef.current;
+    gameSnapshotRef.current = next;
+    if (!previous) return;
+    const drafts: GameEventDraft[] = [];
+    const stamp = Date.now();
+    const taskPoints: Record<Priority, number> = { high: 20, medium: 15, low: 10 };
+    Object.entries(next.tasks).forEach(([id, task]) => {
+      const before = previous.tasks[id];
+      if (!before) drafts.push({ key: `task-created-${id}`, delta: 3, title: "Задача сформулирована", category: "action" });
+      else if (before.done !== task.done) drafts.push({ key: `task-${task.done ? "done" : "undo"}-${id}-${stamp}`, delta: task.done ? taskPoints[task.priority] : -taskPoints[task.priority], title: task.done ? "Задача выполнена" : "Выполнение задачи отменено", category: task.done ? "completion" : "penalty" });
+    });
+    Object.entries(previous.tasks).filter(([id, task]) => !next.tasks[id] && !task.done).forEach(([id]) => drafts.push({ key: `task-abandoned-${id}-${stamp}`, delta: -3, title: "Незавершённая задача удалена", category: "penalty" }));
+    if (previous.today === next.today) Object.entries(next.habits).forEach(([id, done]) => { const before = previous.habits[id]; if (before !== undefined && before !== done) drafts.push({ key: `habit-${done ? "done" : "undo"}-${id}-${stamp}`, delta: done ? 8 : -8, title: done ? "Привычка выполнена" : "Отметка привычки снята", category: done ? "completion" : "penalty" }); });
+    next.projects.filter(id => !previous.projects.includes(id)).forEach(id => drafts.push({ key: `project-created-${id}`, delta: 12, title: "Создан проект с результатом", category: "action" }));
+    next.goals.filter(id => !previous.goals.includes(id)).forEach(id => drafts.push({ key: `goal-created-${id}`, delta: 10, title: "Определена новая цель", category: "action" }));
+    next.inbox.filter(id => !previous.inbox.includes(id)).forEach(id => drafts.push({ key: `inbox-created-${id}`, delta: 2, title: "Мысль сохранена во Входящие", category: "action" }));
+    next.resources.filter(id => !previous.resources.includes(id)).forEach(id => drafts.push({ key: `resource-created-${id}`, delta: 4, title: "Ресурс добавлен в PARA", category: "action" }));
+    next.events.filter(id => !previous.events.includes(id)).forEach(id => drafts.push({ key: `event-created-${id}`, delta: 4, title: "Время запланировано", category: "action" }));
+    next.journals.filter(id => !previous.journals.includes(id)).forEach(id => drafts.push({ key: `journal-created-${id}`, delta: 20, title: "Вечерний разбор завершён", category: "rhythm" }));
+    next.health.filter(id => !previous.health.includes(id)).forEach(id => drafts.push({ key: `health-created-${id}`, delta: 6, title: "Состояние зафиксировано", category: "action" }));
+    Object.entries(next.transactions).forEach(([id, item]) => { if (!previous.transactions[id] && item.posted && !item.recurring && item.kind !== "installment") drafts.push({ key: `finance-created-${id}`, delta: 3, title: "Финансовая операция учтена", category: "action" }); });
+    Object.entries(next.milestones).forEach(([id, done]) => { const before = previous.milestones[id]; if (before !== undefined && before !== done) drafts.push({ key: `milestone-${done ? "done" : "undo"}-${id}-${stamp}`, delta: done ? 12 : -12, title: done ? "Этап проекта завершён" : "Этап проекта возвращён", category: done ? "completion" : "penalty" }); });
+    next.focuses.filter(key => !previous.focuses.includes(key)).forEach(key => drafts.push({ key: `focus-created-${key}`, delta: 5, title: "Фокус недели определён", category: "rhythm" }));
+    if (drafts.length) window.setTimeout(() => setGamification(current => addGameEvents(current, drafts)), 0);
+  }, [loaded, tasks, habits, projects, goals, inboxItems, resources, events, journalEntries, healthNotes, transactions, planningFocuses]);
+
+  useEffect(() => {
+    if (!loaded) return;
+    const now = new Date();
+    const today = localDateKey(now);
+    const score = Math.round((taskCompletion + habitCompletion) / 2);
+    const timer = window.setTimeout(() => setGamification(current => {
+      const drafts: GameEventDraft[] = tasks.filter(task => !task.done && task.dueDate && task.dueDate < today).map(task => ({ key: `missed-deadline-${task.id}-${task.dueDate}`, date: today, delta: -4, title: `Пропущен срок: ${task.title}`, category: "penalty" as const }));
+      let next = addGameEvents(current, drafts);
+      if (now.getHours() < 21 || next.dailyScores.some(day => day.date === today)) return next;
+      const actions = next.events.filter(event => event.date === today && event.delta > 0).length;
+      const previousDay = next.dailyScores[next.dailyScores.length - 1];
+      const endOfDay: GameEventDraft[] = [];
+      if (!actions) endOfDay.push({ key: `inactive-day-${today}`, date: today, delta: -8, title: "День прошёл без зафиксированных действий", category: "penalty" });
+      if (previousDay && previousDay.score - score >= 15) endOfDay.push({ key: `rhythm-drop-${today}`, date: today, delta: -Math.min(20, Math.ceil((previousDay.score - score) / 10) * 4), title: "Ритм снизился относительно прошлого периода", category: "penalty" });
+      next = addGameEvents(next, endOfDay);
+      return { ...next, dailyScores: [...next.dailyScores, { date: today, score, actions }].slice(-60) };
+    }), 0);
+    return () => window.clearTimeout(timer);
+  }, [loaded, tasks, taskCompletion, habitCompletion, clock.today]);
 
   function navigate(next: Section) { setSection(next); window.history.pushState(null, "", `#${encodeURIComponent(next)}`); window.scrollTo({ top: 0, behavior: "smooth" }); }
   function notify(message: string) { setToast(message); window.setTimeout(() => setToast(""), 2600); }
+  function openGamification(){navigate("Обзор");window.setTimeout(()=>document.getElementById("nexus-game")?.scrollIntoView({behavior:"smooth",block:"center"}),80)}
+  function gameCheckIn(kind:"setback"|"recovery"){
+    const today=clock.today;const setback=gamification.events.some(event=>event.key===`self-setback-${today}`);const recovered=gamification.events.some(event=>event.key===`self-recovery-${today}`);
+    if(kind==="recovery"&&!setback){notify("Сначала отметьте срыв фокуса, если он действительно был");return}if(kind==="recovery"&&recovered){notify("Ритм сегодня уже восстановлен");return}
+    const draft:GameEventDraft=kind==="setback"?{key:`self-setback-${today}`,delta:-5,title:"Честно отмечен срыв фокуса",category:"penalty"}:{key:`self-recovery-${today}`,delta:5,title:"Ритм восстановлен маленьким действием",category:"rhythm"};
+    setGamification(current=>addGameEvents(current,[draft]));notify(kind==="setback"?"−5 XP. Без вины — выберите один шаг восстановления":"＋5 XP. Вы вернулись в ритм");
+  }
   function toggleTask(id: number) { setTasks(v => v.map(task => task.id === id ? { ...task, done: !task.done } : task)); }
   function toggleHabit(id: number, date: string) {
     if (date !== clock.today) return;
@@ -436,7 +578,7 @@ export default function Home() {
   }
 
   function content() {
-    if (section === "Обзор") return <Dashboard tasks={tasks} habits={habits} projects={projects} goals={goals} lifeAreas={lifeAreas} taskCompletion={taskCompletion} habitCompletion={habitCompletion} today={clock.today} onToggleTask={toggleTask} onToggleHabit={toggleHabit} navigate={navigate}/>;
+    if (section === "Обзор") return <Dashboard tasks={tasks} habits={habits} projects={projects} goals={goals} lifeAreas={lifeAreas} taskCompletion={taskCompletion} habitCompletion={habitCompletion} today={clock.today} onToggleTask={toggleTask} onToggleHabit={toggleHabit} navigate={navigate} order={dashboardOrder} setOrder={setDashboardOrder} gamification={gamification} onGameCheckIn={gameCheckIn}/>;
     if (section === "Задачи") return <TasksPage tasks={tasks} projects={projects} setTasks={setTasks} onNew={() => { setTaskProjectId(null); setModalKind("task"); }}/>;
     if (section === "Цели") return <GoalsPage goals={goals} setGoals={setGoals} projects={projects} tasks={tasks} onNew={() => setModalKind("goal")}/>;
     if (section === "Проекты") return <ProjectsPage projects={projects} setProjects={setProjects} tasks={tasks} setTasks={setTasks} goals={goals} lifeAreas={lifeAreas} setLifeAreas={setLifeAreas} inboxItems={inboxItems} setInboxItems={setInboxItems} resources={resources} setResources={setResources} selectedId={selectedProjectId} setSelectedId={setSelectedProjectId} onNew={() => setModalKind("project")} onNewTask={projectId => { setTaskProjectId(projectId); setModalKind("task"); }}/>;
@@ -449,7 +591,7 @@ export default function Home() {
   }
 
   return <div className={`app-shell theme-${theme}`}>
-    <aside className={`sidebar ${mobileNav ? "open" : ""}`}><div className="brand"><span className="brand-mark">N</span><div><strong>NEXUS</strong><small>PERSONAL OS</small></div><button type="button" className="mobile-close" onClick={() => setMobileNav(false)}>×</button></div><nav>{nav.map(group => <div className="nav-group" key={group.group}><p>{group.group}</p>{group.items.map(item => <button type="button" key={item.label} className={section === item.label ? "active" : ""} onClick={() => { navigate(item.label); setMobileNav(false); }}><span>{item.icon}</span>{item.label}{item.label === "Задачи" && <em>{tasks.filter(t => !t.done).length}</em>}</button>)}</div>)}</nav><div className="sidebar-foot"><div className="level"><div className="level-top"><span>Уровень 12</span><b>2 840 XP</b></div><div className="mini-track"><i style={{ width: "72%" }}/></div><small>160 XP до нового уровня</small></div><div className="profile"><div className="avatar">А</div><div><strong>Алексей</strong><small>В продуктивном режиме</small></div><span className="online"/></div></div></aside>
+    <aside className={`sidebar ${mobileNav ? "open" : ""}`}><div className="brand"><span className="brand-mark">N</span><div><strong>NEXUS</strong><small>PERSONAL OS</small></div><button type="button" className="mobile-close" onClick={() => setMobileNav(false)}>×</button></div><nav>{nav.map(group => <div className="nav-group" key={group.group}><p>{group.group}</p>{group.items.map(item => <button type="button" key={item.label} className={section === item.label ? "active" : ""} onClick={() => { navigate(item.label); setMobileNav(false); }}><span>{item.icon}</span>{item.label}{item.label === "Задачи" && <em>{tasks.filter(t => !t.done).length}</em>}</button>)}</div>)}</nav><div className="sidebar-foot"><button type="button" className="level level-button" onClick={()=>{openGamification();setMobileNav(false)}}><div className="level-top"><span>Уровень {levelInfo.level}</span><b>{gamification.xp.toLocaleString("ru-RU")} XP</b></div><div className="mini-track"><i style={{ width: `${levelInfo.progress}%` }}/></div><small>{levelInfo.remaining} XP до нового уровня · серия {gameStreak(gamification.activeDays)} дн.</small></button><div className="profile"><div className="avatar">А</div><div><strong>Алексей</strong><small>В продуктивном режиме</small></div><span className="online"/></div></div></aside>
     {mobileNav && <button type="button" className="scrim" onClick={() => setMobileNav(false)} aria-label="Закрыть меню"/>}
     <main className="main"><header><button type="button" className="menu-button" onClick={() => setMobileNav(true)}>☰</button><div className="breadcrumbs"><button type="button" onClick={()=>navigate("Обзор")} aria-label="Перейти на главную страницу">МОЯ СИСТЕМА</button><b>/</b><strong>{section.toUpperCase()}</strong></div><div className="top-actions"><div className="search">⌕ <input aria-label="Поиск" value={search} onChange={e => setSearch(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && search.trim()) { const task = tasks.find(t => t.title.toLowerCase().includes(search.toLowerCase())); const project = projects.find(p => p.name.toLowerCase().includes(search.toLowerCase())); if (task) { navigate("Задачи"); notify(`Найдена задача: ${task.title}`); } else if (project) { navigate("Проекты"); notify(`Найден проект: ${project.name}`); } else notify("Ничего не найдено"); setSearch(""); } }} placeholder="Найти что угодно..."/><kbd>↵</kbd></div><IconButton label="Уведомления" onClick={() => notify("Новых уведомлений нет")}>♢<i/></IconButton><button type="button" className="assistant-mini" onClick={() => setAssistantOpen(true)}><span>✦</span> Спросить NEXUS</button></div></header><div className="page">{content()}</div></main>
     <button type="button" className="ai-fab" onClick={() => setAssistantOpen(true)} aria-label="Открыть AI-ассистента"><span>✦</span><i/></button>
@@ -461,14 +603,27 @@ export default function Home() {
   </div>;
 }
 
-function Dashboard({tasks,habits,projects,goals,lifeAreas,taskCompletion,habitCompletion,today,onToggleTask,onToggleHabit,navigate}:{tasks:Task[];habits:Habit[];projects:Project[];goals:Goal[];lifeAreas:LifeArea[];taskCompletion:number;habitCompletion:number;today:string;onToggleTask:(id:number)=>void;onToggleHabit:(id:number,date:string)=>void;navigate:(s:Section)=>void}) {
+function Dashboard({tasks,habits,projects,goals,lifeAreas,taskCompletion,habitCompletion,today,onToggleTask,onToggleHabit,navigate,order,setOrder,gamification,onGameCheckIn}:{tasks:Task[];habits:Habit[];projects:Project[];goals:Goal[];lifeAreas:LifeArea[];taskCompletion:number;habitCompletion:number;today:string;onToggleTask:(id:number)=>void;onToggleHabit:(id:number,date:string)=>void;navigate:(s:Section)=>void;order:DashboardBlockId[];setOrder:React.Dispatch<React.SetStateAction<DashboardBlockId[]>>;gamification:GamificationState;onGameCheckIn:(kind:"setback"|"recovery")=>void}) {
   const totalScore=Math.round((taskCompletion+habitCompletion)/2);
-  return <><section className="hero-row"><div><span className="eyebrow">{new Date().toLocaleDateString("ru-RU",{weekday:"long",day:"numeric",month:"long"}).toUpperCase()}</span><h1>Доброе утро, Алексей <span>✦</span></h1><p>Сегодня хороший день, чтобы продвинуть то, что действительно важно.</p></div><div className="day-score"><Ring value={totalScore} color="#c9ff4c" size={76}/><div><small>БАЛАНС ДНЯ</small><strong>{totalScore>=70?"Уверенный ритм":"Есть пространство для роста"}</strong><span>задачи + привычки</span></div></div></section>
-  <section className="focus-card"><div className="focus-glow"/><div className="focus-top"><span><i>01</i> ГЛАВНЫЙ ФОКУС ДНЯ</span></div><div className="focus-content"><div><h2>{tasks.find(t=>!t.done)?.title||"Все задачи выполнены"}</h2><p>Один главный результат сегодня важнее длинного списка.</p><div className="tag-row"><span>◈ {tasks.find(t=>!t.done)?.area||"Свободное время"}</span><span>◷ {tasks.find(t=>!t.done)?.time||"Сегодня"}</span></div></div><button type="button" className="focus-action" onClick={()=>navigate("Задачи")}>Открыть задачи <span>→</span></button></div></section>
-  <section className="card tracker-card"><CardHead title="Трекер задач и привычек" subtitle="Живой показатель выполнения сегодня" action="Подробнее" onClick={()=>navigate("Привычки")}/><div className="tracker-metrics"><div><Ring value={taskCompletion} color="#c9ff4c" size={86}/><span><strong>Задачи</strong><small>{tasks.filter(t=>t.done).length} из {tasks.length}</small></span></div><div><Ring value={habitCompletion} color="#57e0b7" size={86}/><span><strong>Привычки</strong><small>{habits.filter(h=>h.checks[today]).length} из {habits.length}</small></span></div><div className="tracker-score"><small>ОБЩИЙ РИТМ</small><strong>{totalScore}%</strong><p>{totalScore>=80?"Отличный темп — удерживайте ритм.":totalScore>=50?"Хороший прогресс. Остался один точный шаг.":"Начните с одного небольшого действия."}</p></div></div></section>
-  <div className="dashboard-grid"><section className="card today-card"><CardHead title="Сегодня" subtitle={`${tasks.filter(t=>t.done).length} из ${tasks.length} выполнено`} action="Все задачи" onClick={()=>navigate("Задачи")}/><div className="progress-line"><i style={{width:`${taskCompletion}%`}}/></div><div className="task-list">{tasks.slice(0,4).map(task=><label className={task.done?"done":""} key={task.id}><input type="checkbox" checked={task.done} onChange={()=>onToggleTask(task.id)}/><span className={`check ${task.priority}`}>✓</span><div><strong>{task.title}</strong><small>{projects.find(p=>p.id===task.projectId)?.name||task.area}</small></div><time>{task.time}</time></label>)}</div></section><section className="card compass"><CardHead title="Компас жизни" subtitle="Баланс ключевых сфер"/><div className="compass-orbits"><div className="orbit-center"><small>СЕГОДНЯ</small><strong>{totalScore}%</strong></div>{lifeAreas.slice(0,6).map((area,index)=><button type="button" key={area.id} style={{"--orbit-color":area.color,"--orbit-index":index} as React.CSSProperties} onClick={()=>navigate(area.name==="Финансы"?"Финансы":area.name==="Здоровье"?"Здоровье":"Задачи")}><span>{area.icon}</span><small>{area.name}</small></button>)}</div></section>
-  <section className="card habits-card"><CardHead title="Привычки" subtitle="Можно отметить только сегодня" action="Все привычки" onClick={()=>navigate("Привычки")}/><div className="habit-list">{habits.map(h=><button type="button" key={h.id} className={h.checks[today]?"complete":""} onClick={()=>onToggleHabit(h.id,today)}><span className="habit-icon">{h.icon}</span><div><strong>{h.name}</strong><small>{h.checks[today]?"Выполнено сегодня":"Ждёт отметки"}</small></div><span className="habit-check">✓</span></button>)}</div></section><section className="card goals-card"><CardHead title="Главные цели" subtitle="Месяц → неделя → сегодня" action="Настроить связи" onClick={()=>navigate("Цели")}/><div className="goal-focus-board">{["МЕСЯЦ","НЕДЕЛЯ","СЕГОДНЯ"].map(period=>{const goal=goals.find(item=>item.period===period);const progress=goal?goalProgressValue(goal,projects,tasks):0;return <button type="button" className={period==="СЕГОДНЯ"?"current":""} key={period} onClick={()=>navigate("Цели")}><span>{period}</span><strong>{goal?.title||"Добавьте цель"}</strong><div><i style={{width:`${progress}%`}}/></div><small>{progress}% · {goal?.projectIds?.length||0} проектов</small></button>})}</div></section></div>
-  <section className="bottom-grid"><div className="card project-mini"><CardHead title="Активные проекты" subtitle={`${projects.length} в работе`} action="Открыть" onClick={()=>navigate("Проекты")}/>{projects.slice(0,3).map(p=>{const progress=projectProgressValue(p,tasks);return <button type="button" className="project-row project-row-button" onClick={()=>navigate("Проекты")} key={p.id}><div className="project-badge">{p.name[0]}</div><div><strong>{p.name}</strong><span><i style={{width:`${progress}%`}}/></span></div><b>{progress}%</b></button>})}</div><div className="card reflection"><div><span className="eyebrow">ВЕЧЕРНИЙ РАЗБОР</span><h3>Как прошёл твой день?</h3><p>Пять минут рефлексии помогают замечать прогресс.</p></div><button type="button" onClick={()=>navigate("Журнал")}>Начать разбор <span>→</span></button></div></section></>;
+  const[editing,setEditing]=useState(false);const[dragging,setDragging]=useState<DashboardBlockId|null>(null);const[pointerDragging,setPointerDragging]=useState<DashboardBlockId|null>(null);
+  const level=gameLevel(gamification.xp);const streak=gameStreak(gamification.activeDays);const todayEvents=gamification.events.filter(event=>event.date===today);const todayDelta=todayEvents.reduce((sum,event)=>sum+event.delta,0);const lastScore=gamification.dailyScores[gamification.dailyScores.length-1];
+  const spans:Record<DashboardBlockId,"full"|"half">={focus:"full",game:"full",tracker:"full",today:"half",compass:"half",habits:"half",goals:"half",projects:"half",reflection:"half"};
+  function moveBlock(source:DashboardBlockId,target:DashboardBlockId){if(source===target)return;setOrder(current=>{const next=current.filter(item=>item!==source);next.splice(Math.max(0,next.indexOf(target)),0,source);return next})}
+  function shiftBlock(id:DashboardBlockId,direction:-1|1){setOrder(current=>{const index=current.indexOf(id);const target=index+direction;if(index<0||target<0||target>=current.length)return current;const next=[...current];[next[index],next[target]]=[next[target],next[index]];return next})}
+  function startPointer(event:React.PointerEvent<HTMLButtonElement>,id:DashboardBlockId){if(event.pointerType==="mouse")return;event.currentTarget.setPointerCapture(event.pointerId);setPointerDragging(id)}
+  function finishPointer(event:React.PointerEvent<HTMLButtonElement>){if(!pointerDragging)return;const target=document.elementFromPoint(event.clientX,event.clientY)?.closest<HTMLElement>("[data-dashboard-widget]")?.dataset.dashboardWidget as DashboardBlockId|undefined;if(target)moveBlock(pointerDragging,target);setPointerDragging(null)}
+  const blocks:Record<DashboardBlockId,React.ReactNode>={
+    focus:<section className="focus-card"><div className="focus-glow"/><div className="focus-top"><span><i>01</i> ГЛАВНЫЙ ФОКУС ДНЯ</span></div><div className="focus-content"><div><h2>{tasks.find(t=>!t.done)?.title||"Все задачи выполнены"}</h2><p>Один главный результат сегодня важнее длинного списка.</p><div className="tag-row"><span>◈ {tasks.find(t=>!t.done)?.area||"Свободное время"}</span><span>◷ {tasks.find(t=>!t.done)?.time||"Сегодня"}</span></div></div><button type="button" className="focus-action" onClick={()=>navigate("Задачи")}>Открыть задачи <span>→</span></button></div></section>,
+    tracker:<section className="card tracker-card"><CardHead title="Трекер задач и привычек" subtitle="Живой показатель выполнения сегодня" action="Подробнее" onClick={()=>navigate("Привычки")}/><div className="tracker-metrics"><div><Ring value={taskCompletion} color="var(--lime)" size={86}/><span><strong>Задачи</strong><small>{tasks.filter(t=>t.done).length} из {tasks.length}</small></span></div><div><Ring value={habitCompletion} color="var(--green)" size={86}/><span><strong>Привычки</strong><small>{habits.filter(h=>h.checks[today]).length} из {habits.length}</small></span></div><div className="tracker-score"><small>ОБЩИЙ РИТМ</small><strong>{totalScore}%</strong><p>{totalScore>=80?"Отличный темп — удерживайте ритм.":totalScore>=50?"Хороший прогресс. Остался один точный шаг.":"Начните с одного небольшого действия."}</p></div></div></section>,
+    today:<section className="card today-card"><CardHead title="Сегодня" subtitle={`${tasks.filter(t=>t.done).length} из ${tasks.length} выполнено`} action="Все задачи" onClick={()=>navigate("Задачи")}/><div className="progress-line"><i style={{width:`${taskCompletion}%`}}/></div><div className="task-list">{tasks.slice(0,4).map(task=><label className={task.done?"done":""} key={task.id}><input type="checkbox" checked={task.done} onChange={()=>onToggleTask(task.id)}/><span className={`check ${task.priority}`}>✓</span><div><strong>{task.title}</strong><small>{projects.find(p=>p.id===task.projectId)?.name||task.area}</small></div><time>{task.time}</time></label>)}</div></section>,
+    compass:<section className="card compass"><CardHead title="Компас жизни" subtitle="Баланс ключевых сфер"/><div className="compass-orbits"><div className="orbit-center"><small>СЕГОДНЯ</small><strong>{totalScore}%</strong></div>{lifeAreas.slice(0,6).map((area,index)=><button type="button" key={area.id} style={{"--orbit-color":area.color,"--orbit-index":index} as React.CSSProperties} onClick={()=>navigate(area.name==="Финансы"?"Финансы":area.name==="Здоровье"?"Здоровье":"Задачи")}><span>{area.icon}</span><small>{area.name}</small></button>)}</div></section>,
+    habits:<section className="card habits-card"><CardHead title="Привычки" subtitle="Можно отметить только сегодня" action="Все привычки" onClick={()=>navigate("Привычки")}/><div className="habit-list">{habits.map(h=><button type="button" key={h.id} className={h.checks[today]?"complete":""} onClick={()=>onToggleHabit(h.id,today)}><span className="habit-icon">{h.icon}</span><div><strong>{h.name}</strong><small>{h.checks[today]?"Выполнено сегодня":"Ждёт отметки"}</small></div><span className="habit-check">✓</span></button>)}</div></section>,
+    goals:<section className="card goals-card"><CardHead title="Главные цели" subtitle="Месяц → неделя → сегодня" action="Настроить связи" onClick={()=>navigate("Цели")}/><div className="goal-focus-board">{["МЕСЯЦ","НЕДЕЛЯ","СЕГОДНЯ"].map(period=>{const goal=goals.find(item=>item.period===period);const progress=goal?goalProgressValue(goal,projects,tasks):0;return <button type="button" className={period==="СЕГОДНЯ"?"current":""} key={period} onClick={()=>navigate("Цели")}><span>{period}</span><strong>{goal?.title||"Добавьте цель"}</strong><div><i style={{width:`${progress}%`}}/></div><small>{progress}% · {goal?.projectIds?.length||0} проектов</small></button>})}</div></section>,
+    projects:<section className="card project-mini"><CardHead title="Активные проекты" subtitle={`${projects.filter(project=>!project.archived).length} в работе`} action="Открыть" onClick={()=>navigate("Проекты")}/>{projects.filter(project=>!project.archived).slice(0,3).map(project=>{const progress=projectProgressValue(project,tasks);return <button type="button" className="project-row project-row-button" onClick={()=>navigate("Проекты")} key={project.id}><div className="project-badge">{project.name[0]}</div><div><strong>{project.name}</strong><span><i style={{width:`${progress}%`}}/></span></div><b>{progress}%</b></button>})}</section>,
+    reflection:<section className="card reflection"><div><span className="eyebrow">ВЕЧЕРНИЙ РАЗБОР</span><h3>Как прошёл твой день?</h3><p>Пять минут рефлексии помогают замечать прогресс и приносят 20 XP.</p></div><button type="button" onClick={()=>navigate("Журнал")}>Начать разбор <span>→</span></button></section>,
+    game:<section className="card game-card"><div className="game-main"><span className="game-level-badge">{level.level}</span><div><span className="eyebrow">NEXUS LEVEL</span><h2>Уровень {level.level} · {gamification.xp.toLocaleString("ru-RU")} XP</h2><p>Очки растут за завершённые действия и честный ритм. Отмена выполнения возвращает начисленные XP.</p><div className="game-progress"><i style={{width:`${level.progress}%`}}/></div><small>{level.current} / {level.step} XP · ещё {level.remaining} до следующего уровня</small></div></div><div className="game-stats"><div><small>СЕРИЯ</small><strong>{streak} дней</strong><span>{streak?"Ритм держится":"Начните сегодня"}</span></div><div className={todayDelta<0?"negative":""}><small>СЕГОДНЯ</small><strong>{todayDelta>0?"+":""}{todayDelta} XP</strong><span>{todayEvents.length} событий</span></div><div><small>РИТМ</small><strong>{lastScore?`${lastScore.score}%`:`${totalScore}%`}</strong><span>{lastScore?"последний итог":"текущий день"}</span></div></div><div className="game-bottom"><div className="game-feed">{gamification.events.slice(0,4).map(event=><div key={event.id}><span className={event.delta<0?"loss":"gain"}>{event.delta>0?"+":""}{event.delta}</span><p><strong>{event.title}</strong><small>{prettyDate(event.date)}</small></p></div>)}{!gamification.events.length&&<p className="empty-copy">Первое выполненное действие появится здесь.</p>}</div><div className="game-rules"><strong>Как считаются очки</strong><span>Задача: +10–20 · привычка: +8</span><span>Этап проекта: +12 · разбор: +20</span><span>Пропущенный срок: −4 · день без действий: −8</span><div><button type="button" onClick={()=>onGameCheckIn("setback")}>Сорвал фокус −5</button><button type="button" onClick={()=>onGameCheckIn("recovery")}>Вернулся в ритм +5</button></div></div></div></section>,
+  };
+  return <><section className="hero-row"><div><span className="eyebrow">{new Date().toLocaleDateString("ru-RU",{weekday:"long",day:"numeric",month:"long"}).toUpperCase()}</span><h1>Доброе утро, Алексей <span>✦</span></h1><p>Сегодня хороший день, чтобы продвинуть то, что действительно важно.</p></div><div className="day-score"><Ring value={totalScore} color="var(--lime)" size={76}/><div><small>БАЛАНС ДНЯ</small><strong>{totalScore>=70?"Уверенный ритм":"Есть пространство для роста"}</strong><span>задачи + привычки</span></div></div></section><div className="dashboard-controls"><div><span className="eyebrow">МОЯ ГЛАВНАЯ</span><strong>{editing?"Перетащите блоки в удобном порядке":"Порядок блоков сохранён на этом устройстве"}</strong></div><div>{editing&&<button type="button" onClick={()=>setOrder(defaultDashboardOrder)}>Сбросить</button>}<button type="button" className={editing?"active":""} onClick={()=>setEditing(value=>!value)}>{editing?"✓ Готово":"Настроить расположение"}</button></div></div><div className={`dashboard-board ${editing?"editing":""}`}>{order.map((id,index)=><div id={id==="game"?"nexus-game":undefined} data-dashboard-widget={id} draggable={editing} onDragStart={event=>{setDragging(id);event.dataTransfer.effectAllowed="move";event.dataTransfer.setData("text/nexus-dashboard",id)}} onDragEnd={()=>setDragging(null)} onDragOver={event=>{if(editing)event.preventDefault()}} onDrop={event=>{event.preventDefault();const source=event.dataTransfer.getData("text/nexus-dashboard") as DashboardBlockId;if(source)moveBlock(source,id);setDragging(null)}} className={`dashboard-widget ${spans[id]} ${dragging===id||pointerDragging===id?"dragging":""}`} key={id}>{editing&&<div className="widget-order-controls"><button type="button" className="widget-drag-handle" aria-label={`Перетащить блок ${gameBlockLabels[id]}`} onPointerDown={event=>startPointer(event,id)} onPointerUp={finishPointer} onPointerCancel={()=>setPointerDragging(null)}>⠿ <span>{gameBlockLabels[id]}</span></button><button type="button" disabled={index===0} onClick={()=>shiftBlock(id,-1)} aria-label="Переместить выше">↑</button><button type="button" disabled={index===order.length-1} onClick={()=>shiftBlock(id,1)} aria-label="Переместить ниже">↓</button></div>}{blocks[id]}</div>)}</div></>;
 }
 
 function CardHead({title,subtitle,action,onClick}:{title:string;subtitle:string;action?:string;onClick?:()=>void}){return <div className="card-head"><div><h3>{title}</h3><span>{subtitle}</span></div>{action&&<button type="button" onClick={onClick}>{action} →</button>}</div>}
@@ -614,13 +769,13 @@ function JournalPage({entries,setEntries,notify}:{entries:JournalEntry[];setEntr
   return <><PageTitle eyebrow="РЕФЛЕКСИЯ" title="Вечерний разбор" text="Все четыре ответа сохраняются в истории."/><div className="journal-layout"><section className="card journal-form"><span className="step-label">0{step} / 04</span><h2>{prompts[step-1]}</h2><p>Даже маленькие наблюдения помогают видеть движение.</p><textarea value={text} onChange={e=>setText(e.target.value)} placeholder="Напиши несколько честных строк..."/><div className="mood-row"><span>Энергия дня</span>{[1,2,3,4,5].map(x=><button type="button" onClick={()=>setMood(x)} className={mood===x?"active":""} key={x}>{x}</button>)}</div><button type="button" className="primary" onClick={next}>{step===4?"Завершить и сохранить":"Продолжить →"}</button></section><aside className="card journal-history"><CardHead title="История записей" subtitle={`${entries.length} записей`}/>{entries.length?entries.map(entry=><button type="button" className={selected?.id===entry.id?"selected":""} onClick={()=>setSelected(entry)} key={entry.id}><span>{new Date(entry.date).toLocaleDateString("ru-RU",{weekday:"long",day:"numeric",month:"long"})}</span><strong>{entry.answers[0]}</strong></button>):<p className="empty-copy">Завершите первый вечерний разбор.</p>}</aside></div>{selected&&<section className="card journal-entry"><div><span className="eyebrow">СОХРАНЁННАЯ ЗАПИСЬ</span><h3>{new Date(selected.date).toLocaleString("ru-RU")}</h3><small>Энергия: {selected.mood}/5</small></div>{selected.answers.map((answer,i)=><div key={i}><strong>{prompts[i]}</strong><p>{answer}</p></div>)}</section>}</>;
 }
 
-function SettingsPage({byok,setByok,notify,theme,setTheme,lifeAreas,setLifeAreas}:{byok:string;setByok:(s:string)=>void;notify:(s:string)=>void;theme:"lime"|"orbit";setTheme:(theme:"lime"|"orbit")=>void;lifeAreas:LifeArea[];setLifeAreas:React.Dispatch<React.SetStateAction<LifeArea[]>>}){
+function SettingsPage({byok,setByok,notify,theme,setTheme,lifeAreas,setLifeAreas}:{byok:string;setByok:(s:string)=>void;notify:(s:string)=>void;theme:Theme;setTheme:(theme:Theme)=>void;lifeAreas:LifeArea[];setLifeAreas:React.Dispatch<React.SetStateAction<LifeArea[]>>}){
   const[tab,setTab]=useState("AI-ассистент");function save(){localStorage.setItem("nexus-byok",byok);notify("Настройки сохранены")}
   return <><PageTitle eyebrow="СИСТЕМА" title="Настройки" text="Персонализируйте NEXUS OS под свой ритм."/><div className="settings-layout"><aside className="settings-nav">{[["✦","AI-ассистент"],["◎","Сферы жизни"],["◐","Внешний вид"],["◉","Профиль"],["♢","Уведомления"],["⇄","Данные"]].map(x=><button type="button" className={tab===x[1]?"active":""} onClick={()=>setTab(x[1])} key={x[1]}>{x[0]} {x[1]}</button>)}</aside><section className="card settings-card">{tab==="AI-ассистент"?<><div className="settings-title"><span className="ai-orb">✦</span><div><h2>NEXUS AI</h2><p>Выполняет понятные команды сразу, без подтверждений.</p></div></div><div className="secure-option"><div><strong>Рекомендуемый режим · серверный ключ</strong><p>Добавьте <code>OPENAI_API_KEY</code> в Vercel. Ключ остаётся на сервере.</p></div><span>БЕЗОПАСНО</span></div><div className="warning"><b>!</b><p><strong>BYOK менее безопасен</strong>Ключ хранится только в этом браузере.</p></div><div className="setting-field"><label>Личный OpenAI API key</label><div className="key-input"><input type="password" value={byok} onChange={e=>setByok(e.target.value)} placeholder="sk-proj-••••••••"/><button type="button" onClick={()=>setByok("")}>Очистить</button></div></div><button type="button" className="primary" onClick={save}>Сохранить</button></>:tab==="Внешний вид"?<ThemeSettings theme={theme} setTheme={setTheme} notify={notify}/>:tab==="Сферы жизни"?<LifeAreasSettings areas={lifeAreas} setAreas={setLifeAreas} notify={notify}/>:<SettingsPlaceholder title={tab} text={tab==="Данные"?"Данные задач, привычек, финансов и журналов хранятся локально на этом устройстве.":"Раздел настроек активен и готов к персонализации."} onClick={save}/>}</section></div></>;
 }
 function SettingsPlaceholder({title,text,onClick}:{title:string;text:string;onClick:()=>void}){return <div className="settings-placeholder"><span className="eyebrow">НАСТРОЙКИ</span><h2>{title}</h2><p>{text}</p><div className="setting-field"><label>Статус</label><input value="Активно" readOnly/></div><button type="button" className="primary" onClick={onClick}>Сохранить</button></div>}
 
-function ThemeSettings({theme,setTheme,notify}:{theme:"lime"|"orbit";setTheme:(theme:"lime"|"orbit")=>void;notify:(s:string)=>void}){return <div><span className="eyebrow">ВНЕШНИЙ ВИД</span><h2>Тема интерфейса</h2><p className="settings-copy">Выбор применяется сразу и сохраняется на этом устройстве.</p><div className="theme-grid"><button type="button" className={theme==="lime"?"selected":""} onClick={()=>{setTheme("lime");notify("Тема «Фокус» включена")}}><span className="theme-preview lime-preview"><i/><i/><i/></span><strong>Фокус</strong><small>Графит и лаймовый акцент</small></button><button type="button" className={theme==="orbit"?"selected":""} onClick={()=>{setTheme("orbit");notify("Тема «Орбита» включена")}}><span className="theme-preview orbit-preview"><i/><i/><i/></span><strong>Орбита</strong><small>Премиальный чёрный и фиолетовый</small></button></div></div>}
+function ThemeSettings({theme,setTheme,notify}:{theme:Theme;setTheme:(theme:Theme)=>void;notify:(s:string)=>void}){return <div><span className="eyebrow">ВНЕШНИЙ ВИД</span><h2>Тема интерфейса</h2><p className="settings-copy">Выбор применяется сразу и сохраняется на этом устройстве.</p><div className="theme-grid"><button type="button" className={theme==="lime"?"selected":""} onClick={()=>{setTheme("lime");notify("Тема «Фокус» включена")}}><span className="theme-preview lime-preview"><i/><i/><i/></span><strong>Фокус</strong><small>Графит и лаймовый акцент</small></button><button type="button" className={theme==="orbit"?"selected":""} onClick={()=>{setTheme("orbit");notify("Тема «Орбита» включена")}}><span className="theme-preview orbit-preview"><i/><i/><i/></span><strong>Орбита</strong><small>Премиальный чёрный и фиолетовый</small></button><button type="button" className={theme==="light"?"selected":""} onClick={()=>{setTheme("light");notify("Светлая тема iOS включена")}}><span className="theme-preview light-preview"><i/><i/><i/></span><strong>Светлая iOS</strong><small>Молочное стекло и системный синий</small></button></div></div>}
 
 function LifeAreasSettings({areas,setAreas,notify}:{areas:LifeArea[];setAreas:React.Dispatch<React.SetStateAction<LifeArea[]>>;notify:(s:string)=>void}){const[name,setName]=useState("");const[icon,setIcon]=useState("✨");return <div><span className="eyebrow">КОМПАС ЖИЗНИ</span><h2>Сферы жизни</h2><p className="settings-copy">Эти кнопки используются в задачах, проектах, целях и привычках.</p><div className="area-editor">{areas.map(area=><div key={area.id}><input aria-label="Иконка сферы" value={area.icon} onChange={e=>setAreas(v=>v.map(a=>a.id===area.id?{...a,icon:e.target.value}:a))}/><input aria-label="Название сферы" value={area.name} onChange={e=>setAreas(v=>v.map(a=>a.id===area.id?{...a,name:e.target.value}:a))}/><input aria-label="Цвет сферы" type="color" value={area.color} onChange={e=>setAreas(v=>v.map(a=>a.id===area.id?{...a,color:e.target.value}:a))}/><button type="button" disabled={areas.length<=1} onClick={()=>setAreas(v=>v.filter(a=>a.id!==area.id))}>×</button></div>)}</div><div className="area-add"><input value={icon} onChange={e=>setIcon(e.target.value)} aria-label="Иконка новой сферы"/><input value={name} onChange={e=>setName(e.target.value)} placeholder="Новая сфера"/><button type="button" onClick={()=>{if(!name.trim())return;setAreas(v=>[...v,{id:newEntityId(),name:name.trim(),icon:icon||"✨",color:"#9f7aea"}]);setName("");notify("Сфера добавлена")}}>＋ Добавить</button></div></div>}
 
