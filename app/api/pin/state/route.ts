@@ -7,7 +7,10 @@ function serverHeaders(prefer?: string) {
   const { key } = supabaseServerConfig();
   return {
     apikey: key,
-    Authorization: `Bearer ${key}`,
+    // Modern sb_secret_* keys are opaque API keys, not JWTs. Sending one as a
+    // Bearer token makes Supabase reject it as "Invalid JWT". Legacy
+    // service_role JWT keys still need the Authorization header.
+    ...(key.startsWith("sb_secret_") ? {} : { Authorization: `Bearer ${key}` }),
     "Content-Type": "application/json",
     ...(prefer ? { Prefer: prefer } : {}),
   };
