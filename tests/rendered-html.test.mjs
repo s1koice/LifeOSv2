@@ -104,9 +104,11 @@ test("supports voice inbox and goal progress driven by linked projects", async (
   assert.match(page, /projectIds\?: number\[\]/);
   assert.match(page, /function goalProgressValue/);
   assert.match(page, /toggleProject/);
-  assert.match(page, /\["МЕСЯЦ","НЕДЕЛЯ","СЕГОДНЯ"\]/);
+  assert.match(page, /goalPeriodOrder/);
+  assert.match(page, /parentGoalId/);
+  assert.match(page, /goalId\?: number/);
   assert.match(ios, /\.voice-capture\.listening/);
-  assert.match(ios, /\.goal-focus-board/);
+  assert.match(ios, /\.goal-ladder/);
   assert.match(ios, /\.goal-link-panel/);
 });
 
@@ -135,10 +137,11 @@ test("supports a reorderable dashboard, light iOS theme and live gamification", 
 });
 
 test("adds server-side PIN auth and private Supabase cloud sync", async () => {
-  const [page, client, server, migration, env] = await Promise.all([
+  const [page, client, server, route, migration, env] = await Promise.all([
     source("app/page.tsx"),
     source("lib/pin-cloud.ts"),
     source("lib/pin-auth-server.ts"),
+    source("app/api/pin/state/route.ts"),
     source("supabase/migrations/002_nexus_pin_state.sql"),
     source(".env.example"),
   ]);
@@ -151,6 +154,10 @@ test("adds server-side PIN auth and private Supabase cloud sync", async () => {
   assert.match(client, /api\/pin\/state/);
   assert.match(server, /NEXUS_SESSION_SECRET/);
   assert.match(server, /SUPABASE_SECRET_KEY/);
+  assert.match(server, /supabase\\\.co/);
+  assert.match(route, /key\.startsWith\("sb_secret_"\)/);
+  assert.match(route, /catch \(error\)/);
+  assert.match(server, /sb_secret_/);
   assert.match(migration, /enable row level security/);
   assert.match(migration, /revoke all.*anon/);
   assert.match(env, /NEXUS_PIN/);
@@ -163,7 +170,7 @@ test("ships the smart day center, PARA wizard and richer task planning", async (
     source("app/ios.css"),
   ]);
 
-  assert.match(page, /УМНЫЙ ЦЕНТР ДНЯ/);
+  assert.match(page, /ЕДИНЫЙ УМНЫЙ ДЕНЬ/);
   assert.match(page, /function ParaReviewWizard/);
   assert.match(page, /ПОШАГОВЫЙ ОБЗОР PARA/);
   assert.match(page, /type TaskEnergy/);
@@ -173,7 +180,24 @@ test("ships the smart day center, PARA wizard and richer task planning", async (
   assert.match(page, /name="energy"/);
   assert.match(page, /name="context"/);
   assert.match(ios, /\.smart-day-center/);
+  assert.match(ios, /\.smart-load/);
   assert.match(ios, /\.para-wizard/);
+});
+
+test("adds full task editing, command menu and fact versus estimate", async () => {
+  const [page, ios] = await Promise.all([
+    source("app/page.tsx"),
+    source("app/ios.css"),
+  ]);
+
+  assert.match(page, /editingTask/);
+  assert.match(page, /function CommandMenu/);
+  assert.match(page, /taskActualMinutes/);
+  assert.match(page, /⌘K/);
+  assert.match(page, /Заметка \/ критерий готовности/);
+  assert.match(ios, /\.command-menu/);
+  assert.match(ios, /\.editable-task-row/);
+  assert.match(ios, /\.estimate-track/);
 });
 
 test("adds automatic AI planning with undo and a month-end finance forecast", async () => {
@@ -193,4 +217,70 @@ test("adds automatic AI planning with undo and a month-end finance forecast", as
   assert.match(page, /БЕЗОПАСНО В ДЕНЬ/);
   assert.match(ios, /\.assistant-undo/);
   assert.match(ios, /\.finance-forecast/);
+});
+
+test("adds a universal quick capture, manual cloud controls and readable light mode", async () => {
+  const [page, ios] = await Promise.all([
+    source("app/page.tsx"),
+    source("app/ios.css"),
+  ]);
+
+  assert.match(page, /function QuickAddMenu/);
+  assert.match(page, /БЫСТРАЯ МЫСЛЬ ВО «ВХОДЯЩИЕ»/);
+  assert.match(page, /function syncNow/);
+  assert.match(page, /function downloadBackup/);
+  assert.match(page, /Синхронизировать сейчас/);
+  assert.match(page, /ПРОСРОЧЕНО/);
+  assert.match(ios, /html\.nexus-light-page,body\.nexus-light-page/);
+  assert.match(ios, /\.theme-light \.history-grid>div/);
+  assert.match(ios, /\.habit-week-row>div>\.habit-copy/);
+});
+
+test("adds actionable notifications and safe backup restoration", async () => {
+  const [page, ios] = await Promise.all([
+    source("app/page.tsx"),
+    source("app/ios.css"),
+  ]);
+
+  assert.match(page, /type NexusNotification/);
+  assert.match(page, /function NotificationCenter/);
+  assert.match(page, /Предстоящие платежи/);
+  assert.match(page, /Разобрать Входящие PARA/);
+  assert.match(page, /function restoreBackup/);
+  assert.match(page, /Заменить текущие данные/);
+  assert.match(page, /Восстановить из файла/);
+  assert.match(ios, /\.notification-center/);
+  assert.match(ios, /\.notification-count/);
+});
+
+test("adds persistent focus sessions and readable personal profile", async () => {
+  const [page, ios] = await Promise.all([
+    source("app/page.tsx"),
+    source("app/ios.css"),
+  ]);
+
+  assert.match(page, /type FocusSession/);
+  assert.match(page, /function FocusMode/);
+  assert.match(page, /Начать фокус/);
+  assert.match(page, /focusSessions/);
+  assert.match(page, /function ProfileSettings/);
+  assert.match(page, /text-\$\{profile\.textScale\}/);
+  assert.match(ios, /\.focus-mode/);
+  assert.match(ios, /\.text-extra/);
+});
+
+test("keeps the chosen task area and removes dark controls from the light theme", async () => {
+  const [page, ios] = await Promise.all([
+    source("app/page.tsx"),
+    source("app/ios.css"),
+  ]);
+
+  assert.match(page, /area: String\(draft\.area \|\| "Личное"\)/);
+  assert.match(page, /Сфера жизни · выбрано:/);
+  assert.match(page, /aria-pressed=\{value===area\.name\}/);
+  assert.match(ios, /Complete light iOS surface pass/);
+  assert.match(ios, /\.theme-light \.secondary-action/);
+  assert.match(ios, /\.theme-light \.planning-note>button/);
+  assert.match(ios, /\.theme-light \.health-stat>span/);
+  assert.match(ios, /\.theme-light \.key-input button/);
 });
