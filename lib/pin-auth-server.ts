@@ -65,7 +65,9 @@ export function pinSessionCookieOptions() {
 }
 
 export function supabaseServerConfig() {
-  const url = (process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || "").replace(/\/$/, "");
+  const rawUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || "";
+  const embeddedUrl = rawUrl.match(/https:\/\/[a-z0-9-]+\.supabase\.co/i)?.[0];
+  const url = (embeddedUrl || rawUrl.trim().replace(/^['"]|['"]$/g, "")).replace(/\/$/, "");
   const key = process.env.SUPABASE_SECRET_KEY || "";
   return { url, key };
 }
