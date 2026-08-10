@@ -66,8 +66,11 @@ export function pinSessionCookieOptions() {
 
 export function supabaseServerConfig() {
   const rawUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || "";
-  const embeddedUrl = rawUrl.match(/https:\/\/[a-z0-9-]+\.supabase\.co/i)?.[0];
-  const url = (embeddedUrl || rawUrl.trim().replace(/^['"]|['"]$/g, "")).replace(/\/$/, "");
+  // Extract the Supabase host and rebuild the URL. This also repairs values
+  // copied as `ttps://...`, with quotes, or as `SUPABASE_URL=https://...`.
+  const supabaseHost = rawUrl.match(/[a-z0-9-]+\.supabase\.co/i)?.[0];
+  const cleanedUrl = rawUrl.trim().replace(/^['"]|['"]$/g, "").replace(/^ttps:\/\//i, "https://");
+  const url = (supabaseHost ? `https://${supabaseHost}` : cleanedUrl).replace(/\/$/, "");
   const rawKey = process.env.SUPABASE_SECRET_KEY || "";
   // Accept either the value itself or a copied `SUPABASE_SECRET_KEY=value` line.
   const modernKey = rawKey.match(/sb_secret_[A-Za-z0-9._-]+/)?.[0];
