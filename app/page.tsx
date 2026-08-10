@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { isSupabaseConfigured, loadCloudState, readSupabaseSession, saveCloudState, signInWithPassword, signOutSupabase, signUpWithPassword, type NexusAuthSession } from "@/lib/supabase-rest";
+import { loadPinCloudState, readPinSession, savePinCloudState, signInWithPin, signOutPin, type PinSession } from "@/lib/pin-cloud";
 
 type Section = "Обзор" | "Задачи" | "Цели" | "Проекты" | "Привычки" | "Финансы" | "Здоровье" | "Планирование" | "Журнал" | "Настройки";
 type Priority = "high" | "medium" | "low";
@@ -356,7 +356,8 @@ export default function Home() {
   const [gamification, setGamification] = useState<GamificationState>(seedGamification);
   const [assistantOpen, setAssistantOpen] = useState(false);
   const [authOpen, setAuthOpen] = useState(false);
-  const [authSession, setAuthSession] = useState<NexusAuthSession | null>(null);
+  const [authSession, setAuthSession] = useState<PinSession | null>(null);
+  const [authChecked, setAuthChecked] = useState(false);
   const [syncStatus, setSyncStatus] = useState<SyncStatus>("local");
   const [cloudReady, setCloudReady] = useState(false);
   const [lastSyncedAt, setLastSyncedAt] = useState("");
@@ -371,7 +372,7 @@ export default function Home() {
   const [loaded, setLoaded] = useState(false);
   const [, setClockTick] = useState(0);
   const gameSnapshotRef = useRef<GameSnapshot | null>(null);
-  const authSessionRef = useRef<NexusAuthSession | null>(null);
+  const authSessionRef = useRef<PinSession | null>(null);
   const statePayloadRef = useRef<Record<string, unknown>>({});
   const lastCloudUpdatedRef = useRef("");
 
@@ -426,42 +427,40 @@ export default function Home() {
 
   useEffect(() => {
     if (!loaded) return;
-    const timer = window.setTimeout(() => {
-      const session = readSupabaseSession();
+    let cancelled = false;
+    readPinSession().then(result => {
+      if (cancelled) return;
+      const session = result.authenticated ? { authenticated: true } as PinSession : null;
       authSessionRef.current = session;
       setAuthSession(session);
       setSyncStatus(session ? "loading" : "local");
-    }, 0);
-    return () => window.clearTimeout(timer);
+      if (!session) setAuthOpen(true);
+    }).catch(() => {
+      if (!cancelled) { setAuthSession(null); setSyncStatus("local"); setAuthOpen(true); }
+    }).finally(() => { if (!cancelled) setAuthChecked(true); });
+    return () => { cancelled = true; };
   }, [loaded]);
 
-  const authUserId = authSession?.user.id;
   useEffect(() => {
-    const sessionToLoad = authSessionRef.current;
-    if (!loaded || !authUserId || !sessionToLoad) return;
+    if (!loaded || !authSession?.authenticated) return;
     let cancelled = false;
-    loadCloudState(sessionToLoad).then(async ({ session, row }) => {
+    loadPinCloudState().then(async ({ row }) => {
       if (cancelled) return;
-      authSessionRef.current = session;
-      setAuthSession(session);
       if (row?.payload) { gameSnapshotRef.current=null; applyStoredState(row.payload); }
-      else await saveCloudState(session, statePayloadRef.current);
+      else await savePinCloudState(statePayloadRef.current);
       if (cancelled) return;
       lastCloudUpdatedRef.current=row?.updated_at||new Date().toISOString();
       setCloudReady(true); setSyncStatus("synced"); setLastSyncedAt(new Date().toISOString());
     }).catch(() => { if (!cancelled) { setCloudReady(false); setSyncStatus("error"); } });
     return () => { cancelled = true; };
-  }, [loaded, authUserId, applyStoredState]);
+  }, [loaded, authSession?.authenticated, applyStoredState]);
 
   useEffect(() => {
     if (!loaded || !cloudReady || !authSessionRef.current) return;
     const timer = window.setTimeout(() => {
-      const session = authSessionRef.current;
-      if (!session) return;
       setSyncStatus("syncing");
-      saveCloudState(session, statePayload).then(fresh => {
-        authSessionRef.current = fresh;
-        const savedAt=new Date().toISOString();lastCloudUpdatedRef.current=savedAt;setLastSyncedAt(savedAt); setSyncStatus("synced");
+      savePinCloudState(statePayload).then(({ row }) => {
+        const savedAt=row.updated_at||new Date().toISOString();lastCloudUpdatedRef.current=savedAt;setLastSyncedAt(savedAt); setSyncStatus("synced");
       }).catch(() => setSyncStatus("error"));
     }, 900);
     return () => window.clearTimeout(timer);
@@ -470,7 +469,7 @@ export default function Home() {
   useEffect(()=>{
     if(!loaded||!cloudReady)return;
     let cancelled=false;
-    const timer=window.setInterval(()=>{const session=authSessionRef.current;if(!session)return;loadCloudState(session).then(({session:fresh,row})=>{if(cancelled)return;authSessionRef.current=fresh;if(row?.updated_at&&row.updated_at>lastCloudUpdatedRef.current){lastCloudUpdatedRef.current=row.updated_at;gameSnapshotRef.current=null;applyStoredState(row.payload);setLastSyncedAt(row.updated_at);setSyncStatus("synced")}}).catch(()=>{if(!cancelled)setSyncStatus("error")})},20_000);
+    const timer=window.setInterval(()=>{if(!authSessionRef.current)return;loadPinCloudState().then(({row})=>{if(cancelled)return;if(row?.updated_at&&row.updated_at>lastCloudUpdatedRef.current){lastCloudUpdatedRef.current=row.updated_at;gameSnapshotRef.current=null;applyStoredState(row.payload);setLastSyncedAt(row.updated_at);setSyncStatus("synced")}}).catch(()=>{if(!cancelled)setSyncStatus("error")})},20_000);
     return()=>{cancelled=true;window.clearInterval(timer)};
   },[loaded,cloudReady,applyStoredState]);
 
@@ -577,12 +576,12 @@ export default function Home() {
 
   function navigate(next: Section) { setSection(next); window.history.pushState(null, "", `#${encodeURIComponent(next)}`); window.scrollTo({ top: 0, behavior: "smooth" }); }
   function notify(message: string) { setToast(message); window.setTimeout(() => setToast(""), 2600); }
-  function acceptAuthSession(session: NexusAuthSession) {
+  function acceptAuthSession(session: PinSession) {
     authSessionRef.current = session; setAuthSession(session); setCloudReady(false); setSyncStatus("loading");
   }
   async function handleSignOut() {
-    await signOutSupabase(authSessionRef.current);
-    authSessionRef.current = null; setAuthSession(null); setCloudReady(false); setSyncStatus("local"); setAuthOpen(false); notify("Вы вышли. Локальные данные остались на устройстве");
+    await signOutPin();
+    authSessionRef.current = null; setAuthSession(null); setCloudReady(false); setSyncStatus("local"); setAuthOpen(true); notify("Система заблокирована");
   }
   function captureUndo(label: string) {
     setUndoStack(current => [{ id: newEntityId(), label, createdAt: new Date().toISOString(), tasks, projects, goals, habits, events }, ...current].slice(0, 10));
@@ -686,12 +685,12 @@ export default function Home() {
   }
 
   return <div className={`app-shell theme-${theme}`}>
-    <aside className={`sidebar ${mobileNav ? "open" : ""}`}><div className="brand"><span className="brand-mark">N</span><div><strong>NEXUS</strong><small>PERSONAL OS</small></div><button type="button" className="mobile-close" onClick={() => setMobileNav(false)}>×</button></div><nav>{nav.map(group => <div className="nav-group" key={group.group}><p>{group.group}</p>{group.items.map(item => <button type="button" key={item.label} className={section === item.label ? "active" : ""} onClick={() => { navigate(item.label); setMobileNav(false); }}><span>{item.icon}</span>{item.label}{item.label === "Задачи" && <em>{tasks.filter(t => !t.done).length}</em>}</button>)}</div>)}</nav><div className="sidebar-foot"><button type="button" className="level level-button" onClick={()=>{openGamification();setMobileNav(false)}}><div className="level-top"><span>Уровень {levelInfo.level}</span><b>{gamification.xp.toLocaleString("ru-RU")} XP</b></div><div className="mini-track"><i style={{ width: `${levelInfo.progress}%` }}/></div><small>{levelInfo.remaining} XP до нового уровня · серия {gameStreak(gamification.activeDays)} дн.</small></button><button type="button" className="profile profile-button" onClick={()=>{setAuthOpen(true);setMobileNav(false)}}><div className="avatar">{authSession?.user.email?.[0]?.toUpperCase()||"А"}</div><div><strong>{authSession?.user.email?.split("@")[0]||"Алексей"}</strong><small>{authSession?syncStatus==="synced"?"Данные синхронизированы":"Синхронизация…":"Локальный режим"}</small></div><span className={authSession&&syncStatus!=="error"?"online":"offline"}/></button></div></aside>
+    <aside className={`sidebar ${mobileNav ? "open" : ""}`}><div className="brand"><span className="brand-mark">N</span><div><strong>NEXUS</strong><small>PERSONAL OS</small></div><button type="button" className="mobile-close" onClick={() => setMobileNav(false)}>×</button></div><nav>{nav.map(group => <div className="nav-group" key={group.group}><p>{group.group}</p>{group.items.map(item => <button type="button" key={item.label} className={section === item.label ? "active" : ""} onClick={() => { navigate(item.label); setMobileNav(false); }}><span>{item.icon}</span>{item.label}{item.label === "Задачи" && <em>{tasks.filter(t => !t.done).length}</em>}</button>)}</div>)}</nav><div className="sidebar-foot"><button type="button" className="level level-button" onClick={()=>{openGamification();setMobileNav(false)}}><div className="level-top"><span>Уровень {levelInfo.level}</span><b>{gamification.xp.toLocaleString("ru-RU")} XP</b></div><div className="mini-track"><i style={{ width: `${levelInfo.progress}%` }}/></div><small>{levelInfo.remaining} XP до нового уровня · серия {gameStreak(gamification.activeDays)} дн.</small></button><button type="button" className="profile profile-button" onClick={()=>{setAuthOpen(true);setMobileNav(false)}}><div className="avatar">А</div><div><strong>Алексей</strong><small>{authSession?syncStatus==="synced"?"Данные сохранены":"Синхронизация…":"Система заблокирована"}</small></div><span className={authSession&&syncStatus!=="error"?"online":"offline"}/></button></div></aside>
     {mobileNav && <button type="button" className="scrim" onClick={() => setMobileNav(false)} aria-label="Закрыть меню"/>}
     <main className="main"><header><button type="button" className="menu-button" onClick={() => setMobileNav(true)}>☰</button><div className="breadcrumbs"><button type="button" onClick={()=>navigate("Обзор")} aria-label="Перейти на главную страницу">МОЯ СИСТЕМА</button><b>/</b><strong>{section.toUpperCase()}</strong></div><div className="top-actions"><button type="button" className={`sync-pill ${syncStatus}`} onClick={()=>setAuthOpen(true)}><span>{syncStatus==="synced"?"✓":syncStatus==="error"?"!":authSession?"↻":"◌"}</span>{authSession?syncStatus==="synced"?"В облаке":syncStatus==="error"?"Ошибка синхронизации":"Сохраняю…":"Войти"}</button><div className="search">⌕ <input aria-label="Поиск" value={search} onChange={e => setSearch(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && search.trim()) { const task = tasks.find(t => t.title.toLowerCase().includes(search.toLowerCase())); const project = projects.find(p => p.name.toLowerCase().includes(search.toLowerCase())); if (task) { navigate("Задачи"); notify(`Найдена задача: ${task.title}`); } else if (project) { navigate("Проекты"); notify(`Найден проект: ${project.name}`); } else notify("Ничего не найдено"); setSearch(""); } }} placeholder="Найти что угодно..."/><kbd>↵</kbd></div><IconButton label="Уведомления" onClick={() => notify("Новых уведомлений нет")}>♢<i/></IconButton><button type="button" className="assistant-mini" onClick={() => setAssistantOpen(true)}><span>✦</span> Спросить NEXUS</button></div></header><div className="page">{content()}</div></main>
     <button type="button" className="ai-fab" onClick={() => setAssistantOpen(true)} aria-label="Открыть AI-ассистента"><span>✦</span><i/></button>
     {modalKind && <CreateModal kind={modalKind} accounts={accounts} projects={projects} areas={lifeAreas} categories={financeCategories} initialProjectId={taskProjectId} initialHabit={editingHabit} onClose={() => { setModalKind(null); setEditingHabit(null); setTaskProjectId(null); }} onCreate={draft => handleCreate(modalKind, draft)}/>} 
-    {authOpen&&<AuthPanel session={authSession} syncStatus={syncStatus} lastSyncedAt={lastSyncedAt} onSession={acceptAuthSession} onSignOut={handleSignOut} onClose={()=>setAuthOpen(false)}/>} 
+    {authChecked&&authOpen&&<AuthPanel session={authSession} syncStatus={syncStatus} lastSyncedAt={lastSyncedAt} onSession={acceptAuthSession} onSignOut={handleSignOut} onClose={()=>{if(authSession)setAuthOpen(false)}}/>} 
     {assistantOpen && <aside className="assistant-panel"><div className="assistant-head"><div><span className="ai-orb">✦</span><div><strong>NEXUS AI</strong><small><i/> выполняет действия сразу</small></div></div><button type="button" onClick={() => setAssistantOpen(false)}>×</button></div><div className="assistant-context"><span>Сейчас вижу</span><b>{tasks.filter(t => !t.done).length} задач · {habits.filter(h => h.checks[clock.today]).length}/{habits.length} привычек · {section}</b></div>{undoStack.length>0&&<button type="button" className="assistant-undo" onClick={undoLastAiAction}>↶ Отменить последнее изменение AI <small>{undoStack[0].label}</small></button>}<div className="messages">{messages.map((m, i) => <div key={i} className={`message ${m.role}`}>{m.text}</div>)}{thinking && <div className="message assistant typing">Выполняю…</div>}</div><div className="suggestions"><button type="button" onClick={() => setPrompt("Добавь задачу: подготовить план на завтра")}>Добавить задачу</button><button type="button" onClick={() => setPrompt("Разбери мой день и сразу назначь время для 3 приоритетных задач")}>Спланировать день</button></div><form className="assistant-form" onSubmit={askAssistant}><textarea value={prompt} onChange={e => setPrompt(e.target.value)} placeholder="Например: распланируй мой день и сразу внеси изменения"/><button type="submit">↑</button></form><small className="ai-note">Изменения применяются автоматически. Кнопка отмены возвращает состояние до последней команды.</small></aside>}
     {toast && <div className="toast">✓ {toast}</div>}
     {undoStack.length>0&&!assistantOpen&&<div className="undo-bar"><span>✦ {undoStack[0].label}</span><button type="button" onClick={undoLastAiAction}>Отменить</button></div>}
@@ -893,10 +892,10 @@ function SettingsPage({byok,setByok,notify,theme,setTheme,lifeAreas,setLifeAreas
 }
 function SettingsPlaceholder({title,text,onClick}:{title:string;text:string;onClick:()=>void}){return <div className="settings-placeholder"><span className="eyebrow">НАСТРОЙКИ</span><h2>{title}</h2><p>{text}</p><div className="setting-field"><label>Статус</label><input value="Активно" readOnly/></div><button type="button" className="primary" onClick={onClick}>Сохранить</button></div>}
 
-function AuthPanel({session,syncStatus,lastSyncedAt,onSession,onSignOut,onClose}:{session:NexusAuthSession|null;syncStatus:SyncStatus;lastSyncedAt:string;onSession:(session:NexusAuthSession)=>void;onSignOut:()=>void;onClose:()=>void}){
-  const[mode,setMode]=useState<"signin"|"signup">("signin");const[email,setEmail]=useState("");const[password,setPassword]=useState("");const[busy,setBusy]=useState(false);const[message,setMessage]=useState("");
-  async function submit(event:FormEvent){event.preventDefault();if(busy)return;setBusy(true);setMessage("");try{const next=mode==="signin"?await signInWithPassword(email.trim(),password):await signUpWithPassword(email.trim(),password);if(next){onSession(next);setMessage("Вход выполнен. Загружаю облачные данные…")}else setMessage("Проверьте почту и подтвердите регистрацию, затем войдите.")}catch(error){setMessage(error instanceof Error?error.message:"Не удалось выполнить вход")}finally{setBusy(false)}}
-  return <div className="modal-wrap auth-wrap" onMouseDown={onClose}><section className="quick-modal auth-panel" onMouseDown={event=>event.stopPropagation()}><div><span className="eyebrow">NEXUS CLOUD</span><button type="button" onClick={onClose}>×</button></div>{!isSupabaseConfigured?<><div className="auth-cloud-icon">☁</div><h2>Подключите Supabase</h2><p>Локальный режим продолжает работать. Для входа и синхронизации добавьте публичные параметры проекта в Vercel или <code>.env.local</code>, затем выполните SQL-миграцию из папки <code>supabase/migrations</code>.</p><div className="auth-env"><code>NEXT_PUBLIC_SUPABASE_URL</code><code>NEXT_PUBLIC_SUPABASE_ANON_KEY</code></div><button type="button" className="primary modal-submit" onClick={onClose}>Понятно</button></>:session?<><div className="auth-user"><span>{session.user.email?.[0]?.toUpperCase()||"N"}</span><div><small>ВЫ ВОШЛИ КАК</small><h2>{session.user.email||"Пользователь NEXUS"}</h2></div></div><div className={`cloud-status ${syncStatus}`}><span>{syncStatus==="synced"?"✓":syncStatus==="error"?"!":"↻"}</span><div><strong>{syncStatus==="synced"?"Все изменения в облаке":syncStatus==="error"?"Не удалось синхронизировать":"Синхронизация…"}</strong><small>{lastSyncedAt?`Последнее сохранение ${new Date(lastSyncedAt).toLocaleTimeString("ru-RU",{hour:"2-digit",minute:"2-digit"})}`:"Объединяем данные устройства и облака"}</small></div></div><div className="cloud-policy"><strong>Как работает синхронизация</strong><p>При первом входе облачная версия загружается на устройство. После этого каждое изменение автоматически сохраняется с задержкой меньше секунды. Данные других пользователей закрыты RLS-политиками.</p></div><button type="button" className="auth-signout" onClick={onSignOut}>Выйти из аккаунта</button></>:<><div className="auth-cloud-icon">☁</div><h2>{mode==="signin"?"Войти и синхронизировать":"Создать аккаунт NEXUS"}</h2><p>Задачи, PARA, привычки, финансы и настройки будут доступны на ваших устройствах.</p><div className="auth-switch"><button type="button" className={mode==="signin"?"active":""} onClick={()=>setMode("signin")}>Вход</button><button type="button" className={mode==="signup"?"active":""} onClick={()=>setMode("signup")}>Регистрация</button></div><form onSubmit={submit}><label className="modal-field"><span>Email</span><input type="email" required autoComplete="email" value={email} onChange={event=>setEmail(event.target.value)} placeholder="name@example.com"/></label><label className="modal-field"><span>Пароль</span><input type="password" required minLength={6} autoComplete={mode==="signin"?"current-password":"new-password"} value={password} onChange={event=>setPassword(event.target.value)} placeholder="Минимум 6 символов"/></label>{message&&<p className="auth-message">{message}</p>}<button type="submit" className="primary modal-submit" disabled={busy}>{busy?"Подождите…":mode==="signin"?"Войти":"Создать аккаунт"}</button></form><small className="auth-note">Сессия хранится на этом устройстве. В базе сохраняется только ваша строка данных, закрытая политиками доступа Supabase.</small></>}</section></div>
+function AuthPanel({session,syncStatus,lastSyncedAt,onSession,onSignOut,onClose}:{session:PinSession|null;syncStatus:SyncStatus;lastSyncedAt:string;onSession:(session:PinSession)=>void;onSignOut:()=>void;onClose:()=>void}){
+  const[pin,setPin]=useState("");const[busy,setBusy]=useState(false);const[message,setMessage]=useState("");
+  async function submit(event:FormEvent){event.preventDefault();if(busy)return;setBusy(true);setMessage("");try{const next=await signInWithPin(pin);onSession(next);setMessage("Готово. Загружаю вашу систему…")}catch(error){setMessage(error instanceof Error?error.message:"Не удалось выполнить вход")}finally{setBusy(false)}}
+  return <div className="modal-wrap auth-wrap" onMouseDown={onClose}><section className="quick-modal auth-panel pin-panel" onMouseDown={event=>event.stopPropagation()}><div><span className="eyebrow">NEXUS · ЛИЧНЫЙ ДОСТУП</span>{session&&<button type="button" onClick={onClose}>×</button>}</div>{session?<><div className="auth-user"><span>А</span><div><small>ЛИЧНАЯ СИСТЕМА</small><h2>Алексей</h2></div></div><div className={`cloud-status ${syncStatus}`}><span>{syncStatus==="synced"?"✓":syncStatus==="error"?"!":"↻"}</span><div><strong>{syncStatus==="synced"?"Все изменения сохранены":syncStatus==="error"?"Не удалось сохранить данные":"Синхронизация…"}</strong><small>{lastSyncedAt?`Последнее сохранение ${new Date(lastSyncedAt).toLocaleTimeString("ru-RU",{hour:"2-digit",minute:"2-digit"})}`:"Загружаем данные из Supabase"}</small></div></div><div className="cloud-policy"><strong>Одна система на всех устройствах</strong><p>После входа задачи, проекты, привычки, финансы и журнал автоматически загружаются и сохраняются в вашей личной записи.</p></div><button type="button" className="auth-signout" onClick={onSignOut}>Заблокировать систему</button></>:<><div className="auth-cloud-icon pin-lock">●</div><h2>Введите PIN-код</h2><p>Без почты, регистрации и лишних шагов. Один PIN открывает вашу личную систему.</p><form onSubmit={submit}><label className="modal-field pin-field"><span>PIN-код</span><input autoFocus type="password" inputMode="numeric" pattern="[0-9]*" minLength={4} maxLength={12} required autoComplete="current-password" value={pin} onChange={event=>setPin(event.target.value.replace(/\D/g,""))} placeholder="••••••"/></label>{message&&<p className="auth-message">{message}</p>}<button type="submit" className="primary modal-submit" disabled={busy||pin.length<4}>{busy?"Проверяю…":"Открыть NEXUS"}</button></form><small className="auth-note">PIN проверяется на сервере. Закрытый ключ базы данных никогда не передаётся в браузер.</small></>}</section></div>
 }
 
 function ThemeSettings({theme,setTheme,notify}:{theme:Theme;setTheme:(theme:Theme)=>void;notify:(s:string)=>void}){return <div><span className="eyebrow">ВНЕШНИЙ ВИД</span><h2>Тема интерфейса</h2><p className="settings-copy">Выбор применяется сразу и сохраняется на этом устройстве.</p><div className="theme-grid"><button type="button" className={theme==="lime"?"selected":""} onClick={()=>{setTheme("lime");notify("Тема «Фокус» включена")}}><span className="theme-preview lime-preview"><i/><i/><i/></span><strong>Фокус</strong><small>Графит и лаймовый акцент</small></button><button type="button" className={theme==="orbit"?"selected":""} onClick={()=>{setTheme("orbit");notify("Тема «Орбита» включена")}}><span className="theme-preview orbit-preview"><i/><i/><i/></span><strong>Орбита</strong><small>Премиальный чёрный и фиолетовый</small></button><button type="button" className={theme==="light"?"selected":""} onClick={()=>{setTheme("light");notify("Светлая тема iOS включена")}}><span className="theme-preview light-preview"><i/><i/><i/></span><strong>Светлая iOS</strong><small>Молочное стекло и системный синий</small></button></div></div>}

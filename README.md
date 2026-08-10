@@ -69,20 +69,23 @@ npm run dev
 
 BYOK в настройках предназначен для локального тестирования. Ключ хранится в `localStorage` текущего браузера, поэтому этот режим нельзя считать таким же безопасным, как серверный.
 
-## Supabase: вход и синхронизация
+## Supabase: личный PIN и синхронизация
 
-1. Создайте проект в Supabase.
-2. Откройте SQL Editor и выполните файл `supabase/migrations/001_nexus_user_state.sql`.
-3. Скопируйте публичные параметры проекта в `.env.local`:
+Email-регистрация не используется. Один личный PIN проверяется только сервером, после чего браузер получает защищённую сессию на 30 дней.
+
+1. В Supabase откройте SQL Editor и выполните `supabase/migrations/002_nexus_pin_state.sql`.
+2. В Supabase откройте Connect и скопируйте Project URL.
+3. В Settings → API Keys скопируйте серверный Secret key (`sb_secret_...`). Никогда не добавляйте его в переменную с префиксом `NEXT_PUBLIC_`.
+4. Добавьте в `.env.local` или в Vercel:
 
 ```bash
-NEXT_PUBLIC_SUPABASE_URL=https://YOUR_PROJECT.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=YOUR_PUBLISHABLE_KEY
+SUPABASE_URL=https://YOUR_PROJECT.supabase.co
+SUPABASE_SECRET_KEY=sb_secret_YOUR_SERVER_KEY
+NEXUS_PIN=YOUR_PERSONAL_PIN
+NEXUS_SESSION_SECRET=YOUR_LONG_RANDOM_SECRET_AT_LEAST_32_CHARACTERS
 ```
 
-4. Перезапустите сайт. Нажмите на профиль в левом нижнем углу или кнопку «Войти» сверху.
-
-Сервисный ключ Supabase не нужен и не должен находиться в браузере. Доступ даётся публичным ключом вместе с сессией вошедшего пользователя, а таблица защищена RLS-политиками. При первом входе облачная версия имеет приоритет, если она уже существует; если облачной версии нет, в неё записывается текущее локальное состояние. Далее изменения синхронизируются автоматически.
+После входа первая облачная копия создаётся автоматически. Далее изменения сохраняются примерно через секунду и проверяются на других открытых устройствах каждые 20 секунд. Таблица закрыта для браузерных ключей; читать и изменять её может только серверный маршрут сайта.
 
 ## GitHub
 
@@ -102,7 +105,7 @@ git push -u origin main
 1. Импортируйте GitHub-репозиторий в Vercel.
 2. Framework Preset: **Next.js**.
 3. В Project Settings → Environment Variables добавьте `OPENAI_API_KEY` и, при желании, `OPENAI_MODEL`.
-4. Для входа добавьте `NEXT_PUBLIC_SUPABASE_URL` и `NEXT_PUBLIC_SUPABASE_ANON_KEY`.
+4. Для личного PIN-входа добавьте `SUPABASE_URL`, `SUPABASE_SECRET_KEY`, `NEXUS_PIN` и `NEXUS_SESSION_SECRET`.
 5. Нажмите Deploy.
 
 Если AI не нужен, переменные можно не добавлять: остальная система продолжит работать.
@@ -112,14 +115,16 @@ git push -u origin main
 ```text
 app/
   api/assistant/route.ts  # серверный AI-маршрут
+  api/pin/                # защищённый PIN-вход и облачное состояние
   globals.css             # дизайн-система и адаптивность
   ios.css                 # iOS-слой, мобильная панель и интерфейс PARA
   layout.tsx              # метаданные и общий layout
   page.tsx                # интерфейс и локальная модель данных
 lib/
-  supabase-rest.ts        # вход, обновление сессии и облачная синхронизация
+  pin-auth-server.ts      # серверная проверка PIN и сессии
+  pin-cloud.ts            # клиент облачной синхронизации
 supabase/migrations/
-  001_nexus_user_state.sql # таблица данных и RLS-политики
+  002_nexus_pin_state.sql # закрытая таблица личной системы
 .env.example              # пример безопасных переменных
 public/                   # статические файлы
 ```

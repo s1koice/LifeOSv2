@@ -134,24 +134,27 @@ test("supports a reorderable dashboard, light iOS theme and live gamification", 
   assert.match(ios, /\.theme-light/);
 });
 
-test("adds Supabase auth, RLS-protected cloud sync and local fallback", async () => {
-  const [page, client, migration, env] = await Promise.all([
+test("adds server-side PIN auth and private Supabase cloud sync", async () => {
+  const [page, client, server, migration, env] = await Promise.all([
     source("app/page.tsx"),
-    source("lib/supabase-rest.ts"),
-    source("supabase/migrations/001_nexus_user_state.sql"),
+    source("lib/pin-cloud.ts"),
+    source("lib/pin-auth-server.ts"),
+    source("supabase/migrations/002_nexus_pin_state.sql"),
     source(".env.example"),
   ]);
 
   assert.match(page, /function AuthPanel/);
-  assert.match(page, /loadCloudState/);
-  assert.match(page, /saveCloudState/);
-  assert.match(client, /auth\/v1\/token\?grant_type=password/);
-  assert.match(client, /auth\/v1\/token\?grant_type=refresh_token/);
-  assert.match(client, /rest\/v1\/nexus_user_state/);
+  assert.match(page, /loadPinCloudState/);
+  assert.match(page, /savePinCloudState/);
+  assert.match(page, /Введите PIN-код/);
+  assert.match(client, /api\/pin\/session/);
+  assert.match(client, /api\/pin\/state/);
+  assert.match(server, /NEXUS_SESSION_SECRET/);
+  assert.match(server, /SUPABASE_SECRET_KEY/);
   assert.match(migration, /enable row level security/);
-  assert.match(migration, /\(select auth\.uid\(\)\) = user_id/);
-  assert.match(env, /NEXT_PUBLIC_SUPABASE_URL/);
-  assert.match(env, /NEXT_PUBLIC_SUPABASE_ANON_KEY/);
+  assert.match(migration, /revoke all.*anon/);
+  assert.match(env, /NEXUS_PIN/);
+  assert.match(env, /SUPABASE_SECRET_KEY/);
 });
 
 test("ships the smart day center, PARA wizard and richer task planning", async () => {
