@@ -1,7 +1,11 @@
+import { request as httpsRequest } from "node:https";
 import { NextResponse } from "next/server";
 import { hasPinSession, pinAuthConfigured, supabaseServerConfig } from "@/lib/pin-auth-server";
 
 type CloudRow = { payload: Record<string, unknown>; updated_at: string };
+type SupabaseResult = { status: number; body: string };
+
+export const runtime = "nodejs";
 
 function safeErrorMessage(error: unknown, fallback: string) {
   if (error && typeof error === "object" && "message" in error && typeof error.message === "string") {
@@ -10,8 +14,8 @@ function safeErrorMessage(error: unknown, fallback: string) {
   return fallback;
 }
 
-async function supabaseFailure(response: Response, fallback: string) {
-  const rawBody = await response.text().catch(() => "");
+function supabaseFailure(response: SupabaseResult, fallback: string) {
+  const rawBody = response.body;
   let detail = rawBody;
   try {
     const body = JSON.parse(rawBody) as { code?: string; message?: string; hint?: string };
@@ -22,6 +26,33 @@ async function supabaseFailure(response: Response, fallback: string) {
   detail = detail.trim().slice(0, 500);
   console.error("NEXUS Supabase request failed", response.status, detail || fallback);
   return NextResponse.json({ error: detail ? `Supabase ${response.status}: ${detail}` : fallback }, { status: 502 });
+}
+
+function supabaseRequest(path: string, options: { method?: "GET" | "POST"; body?: string; prefer?: string } = {}) {
+  const { url } = supabaseServerConfig();
+  const endpoint = new URL(path, `${url}/`);
+  const body = options.body;
+
+  return new Promise<SupabaseResult>((resolve, reject) => {
+    const req = httpsRequest(endpoint, {
+      method: options.method || "GET",
+      headers: {
+        ...serverHeaders(options.prefer),
+        ...(body ? { "Content-Length": Buffer.byteLength(body).toString() } : {}),
+      },
+    }, response => {
+      const chunks: Buffer[] = [];
+      response.on("data", chunk => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+      response.on("end", () => resolve({
+        status: response.statusCode || 500,
+        body: Buffer.concat(chunks).toString("utf8"),
+      }));
+    });
+    req.setTimeout(15_000, () => req.destroy(new Error("Превышено время ожидания ответа Supabase")));
+    req.on("error", reject);
+    if (body) req.write(body);
+    req.end();
+  });
 }
 
 function serverHeaders(prefer?: string) {
@@ -45,13 +76,9 @@ export async function GET() {
   try {
     const denied = await authorize();
     if (denied) return denied;
-    const { url } = supabaseServerConfig();
-    const response = await fetch(`${url}/rest/v1/nexus_pin_state?owner=eq.primary&select=payload,updated_at&limit=1`, {
-      headers: serverHeaders(),
-      cache: "no-store",
-    });
-    if (!response.ok) return supabaseFailure(response, "Не удалось прочитать данные из Supabase");
-    const rows = await response.json() as CloudRow[];
+    const response = await supabaseRequest("rest/v1/nexus_pin_state?owner=eq.primary&select=payload,updated_at&limit=1");
+    if (response.status < 200 || response.status >= 300) return supabaseFailure(response, "Не удалось прочитать данные из Supabase");
+    const rows = JSON.parse(response.body) as CloudRow[];
     return NextResponse.json({ row: rows[0] || null });
   } catch (error) {
     const message = safeErrorMessage(error, "Не удалось связаться с Supabase");
@@ -68,15 +95,14 @@ export async function PUT(request: Request) {
     if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
       return NextResponse.json({ error: "Некорректные данные" }, { status: 400 });
     }
-    const { url } = supabaseServerConfig();
     const updatedAt = new Date().toISOString();
-    const response = await fetch(`${url}/rest/v1/nexus_pin_state?on_conflict=owner`, {
+    const response = await supabaseRequest("rest/v1/nexus_pin_state?on_conflict=owner", {
       method: "POST",
-      headers: serverHeaders("resolution=merge-duplicates,return=representation"),
       body: JSON.stringify({ owner: "primary", payload, updated_at: updatedAt }),
+      prefer: "resolution=merge-duplicates,return=representation",
     });
-    if (!response.ok) return supabaseFailure(response, "Не удалось сохранить данные в Supabase");
-    const rows = await response.json() as CloudRow[];
+    if (response.status < 200 || response.status >= 300) return supabaseFailure(response, "Не удалось сохранить данные в Supabase");
+    const rows = JSON.parse(response.body) as CloudRow[];
     return NextResponse.json({ row: rows[0] || { payload, updated_at: updatedAt } });
   } catch (error) {
     const message = safeErrorMessage(error, "Не удалось связаться с Supabase");
