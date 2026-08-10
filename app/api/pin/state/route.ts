@@ -3,6 +3,13 @@ import { hasPinSession, pinAuthConfigured, supabaseServerConfig } from "@/lib/pi
 
 type CloudRow = { payload: Record<string, unknown>; updated_at: string };
 
+async function supabaseFailure(response: Response, fallback: string) {
+  const body = await response.json().catch(() => ({})) as { code?: string; message?: string; hint?: string };
+  const detail = [body.code, body.message, body.hint].filter(Boolean).join(" · ");
+  console.error("NEXUS Supabase request failed", response.status, detail || fallback);
+  return NextResponse.json({ error: detail ? `Supabase: ${detail}` : fallback }, { status: 502 });
+}
+
 function serverHeaders(prefer?: string) {
   const { key } = supabaseServerConfig();
   return {
@@ -29,7 +36,7 @@ export async function GET() {
   const response = await fetch(`${url}/rest/v1/nexus_pin_state?owner=eq.primary&select=payload,updated_at&limit=1`, {
     headers: serverHeaders(), cache: "no-store",
   });
-  if (!response.ok) return NextResponse.json({ error: "Не удалось прочитать данные из Supabase" }, { status: 502 });
+  if (!response.ok) return supabaseFailure(response, "Не удалось прочитать данные из Supabase");
   const rows = await response.json() as CloudRow[];
   return NextResponse.json({ row: rows[0] || null });
 }
@@ -48,7 +55,7 @@ export async function PUT(request: Request) {
     headers: serverHeaders("resolution=merge-duplicates,return=representation"),
     body: JSON.stringify({ owner: "primary", payload, updated_at: updatedAt }),
   });
-  if (!response.ok) return NextResponse.json({ error: "Не удалось сохранить данные в Supabase" }, { status: 502 });
+  if (!response.ok) return supabaseFailure(response, "Не удалось сохранить данные в Supabase");
   const rows = await response.json() as CloudRow[];
   return NextResponse.json({ row: rows[0] || { payload, updated_at: updatedAt } });
 }
