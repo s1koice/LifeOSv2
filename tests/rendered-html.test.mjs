@@ -320,3 +320,26 @@ test("adds a unified day runway and seven-day plan-versus-actual insight", async
   assert.match(ios, /\.week-work-chart/);
   assert.match(ios, /\.rhythm-summary/);
 });
+
+test("imports Discount and Visa files with Russian categories and duplicate protection", async () => {
+  const [page, importer, ios, packageJson] = await Promise.all([
+    source("app/page.tsx"),
+    source("lib/bank-import.ts"),
+    source("app/ios.css"),
+    source("package.json"),
+  ]);
+
+  assert.match(page, /function BankImportModal/);
+  assert.match(page, /Импорт банка/);
+  assert.match(page, /Защита от двойного учёта включена/);
+  assert.match(page, /importFingerprint/);
+  assert.match(importer, /export async function parseBankFiles/);
+  assert.match(importer, /utf-16le/);
+  assert.match(importer, /Счёт карты Excel/);
+  assert.match(importer, /История карт Excel/);
+  assert.match(importer, /isCardSettlement/);
+  assert.match(importer, /russianTitle/);
+  assert.match(ios, /\.bank-import-modal/);
+  assert.match(ios, /\.import-preview/);
+  assert.match(packageJson, /"fflate"/);
+});
