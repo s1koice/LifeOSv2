@@ -418,3 +418,63 @@ test("filters the journal by wallet and keeps card settlement out of expenses", 
   assert.match(ios, /\.forecast-ring \.ring\{flex:0 0 92px/);
   assert.match(ios, /Wallet filter and statement-first finance flow/);
 });
+
+test("organizes inbox captures immediately without extra questions", async () => {
+  const [page, assistant] = await Promise.all([
+    source("app/page.tsx"),
+    source("app/api/assistant/route.ts"),
+  ]);
+
+  assert.match(page, /async function smartCapture/);
+  assert.match(page, /type === "organize_capture"/);
+  assert.match(page, /status: "organized"/);
+  assert.match(page, /destination === "task"/);
+  assert.match(assistant, /CAPTURE_SYSTEM/);
+  assert.match(assistant, /organize_capture/);
+  assert.match(assistant, /Не задавай вопросов/);
+  assert.match(assistant, /tool_choice: captureMode \? "required"/);
+});
+
+test("adds a unified daily cycle and a recommendation center", async () => {
+  const [page, ios] = await Promise.all([
+    source("app/page.tsx"),
+    source("app/ios.css"),
+  ]);
+
+  assert.match(page, /function buildRecommendations/);
+  assert.match(page, /ЦЕНТР РЕШЕНИЙ/);
+  assert.match(page, /Единый поток дня/);
+  assert.match(page, /Выбрать главное/);
+  assert.match(page, /Подвести итог/);
+  assert.match(ios, /\.recommendation-center/);
+  assert.match(ios, /\.day-cycle/);
+});
+
+test("opens a visual goal workspace with projects and next actions", async () => {
+  const [page, ios] = await Promise.all([
+    source("app/page.tsx"),
+    source("app/ios.css"),
+  ]);
+
+  assert.match(page, /goal-detail-page/);
+  assert.match(page, /СЛЕДУЮЩЕЕ ДЕЙСТВИЕ/);
+  assert.match(page, /Проекты цели/);
+  assert.match(page, /ДОЧЕРНИЕ ЦЕЛИ/);
+  assert.match(page, /selected\.cover/);
+  assert.match(ios, /\.goal-detail-hero/);
+  assert.match(ios, /\.goal-detail-grid/);
+});
+
+test("reviews uncertain bank categories after import", async () => {
+  const [page, ios] = await Promise.all([
+    source("app/page.tsx"),
+    source("app/ios.css"),
+  ]);
+
+  assert.match(page, /function FinanceReconciliation/);
+  assert.match(page, /СВЕРКА ПОСЛЕ ИМПОРТА/);
+  assert.match(page, /требуют внимания/);
+  assert.match(page, /reconciled:true/);
+  assert.match(ios, /\.finance-reconciliation/);
+  assert.match(ios, /\.reconciliation-list/);
+});
