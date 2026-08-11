@@ -303,3 +303,20 @@ test("supports editable goal branches and configurable day capacity", async () =
   assert.match(ios, /\.capacity-picker/);
   assert.match(ios, /\.capacity-settings/);
 });
+
+test("adds a unified day runway and seven-day plan-versus-actual insight", async () => {
+  const [page, ios] = await Promise.all([
+    source("app/page.tsx"),
+    source("app/ios.css"),
+  ]);
+
+  assert.match(page, /weekInsight/);
+  assert.match(page, /function sevenDayWorkSeries/);
+  assert.match(page, /ЛИНИЯ СЕГОДНЯ/);
+  assert.match(page, /План и факт без самообмана/);
+  assert.match(page, /точность оценки/);
+  assert.match(ios, /\.rhythm-studio/);
+  assert.match(ios, /\.day-runway/);
+  assert.match(ios, /\.week-work-chart/);
+  assert.match(ios, /\.rhythm-summary/);
+});
