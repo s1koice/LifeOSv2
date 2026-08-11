@@ -344,6 +344,24 @@ test("imports Discount and Visa files with Russian categories and duplicate prot
   assert.match(packageJson, /"fflate"/);
 });
 
+test("maps personal Visa accounts and presents goals as simple horizon lists", async () => {
+  const [page, ios] = await Promise.all([
+    source("app/page.tsx"),
+    source("app/ios.css"),
+  ]);
+
+  assert.match(page, /MAIN_DEBIT_CARD_LAST4 = "1078"/);
+  assert.match(page, /CREDIT_CARD_LAST4 = "2719"/);
+  assert.match(page, /function normalizePersonalAccounts/);
+  assert.match(page, /Основной счёт · Visa •••• 1078/);
+  assert.match(page, /Цели на год/);
+  assert.match(page, /Цели на месяц/);
+  assert.match(page, /Цели на неделю/);
+  assert.match(ios, /Simple dashboard goal horizons/);
+  assert.match(ios, /\.dashboard-goal-groups/);
+  assert.match(ios, /\.dashboard-goal-row/);
+});
+
 test("keeps finance controls readable in light mode and manages custom categories", async () => {
   const [page, ios] = await Promise.all([
     source("app/page.tsx"),
