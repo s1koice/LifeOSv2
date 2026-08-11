@@ -343,3 +343,21 @@ test("imports Discount and Visa files with Russian categories and duplicate prot
   assert.match(ios, /\.import-preview/);
   assert.match(packageJson, /"fflate"/);
 });
+
+test("keeps finance controls readable in light mode and manages custom categories", async () => {
+  const [page, ios] = await Promise.all([
+    source("app/page.tsx"),
+    source("app/ios.css"),
+  ]);
+
+  assert.match(page, /＋ Добавить или изменить/);
+  assert.match(page, /function renameFinanceCategory/);
+  assert.match(page, /function deleteFinanceCategory/);
+  assert.match(page, /Сохранить категории/);
+  assert.match(page, /Такая категория уже существует/);
+  assert.match(ios, /Finance operation and editable categories/);
+  assert.match(ios, /\.theme-light \.finance-kind button/);
+  assert.match(ios, /\.theme-light \.amount-screen/);
+  assert.match(ios, /\.theme-light \.number-pad button/);
+  assert.match(ios, /\.theme-light \.category-picker button/);
+});
