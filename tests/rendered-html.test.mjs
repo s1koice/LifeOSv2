@@ -284,3 +284,22 @@ test("keeps the chosen task area and removes dark controls from the light theme"
   assert.match(ios, /\.theme-light \.health-stat>span/);
   assert.match(ios, /\.theme-light \.key-input button/);
 });
+
+test("supports editable goal branches and configurable day capacity", async () => {
+  const [page, ios] = await Promise.all([
+    source("app/page.tsx"),
+    source("app/ios.css"),
+  ]);
+
+  assert.match(page, /editingGoal/);
+  assert.match(page, /function goalChainForArea/);
+  assert.match(page, /goalAreaValue/);
+  assert.match(page, /dailyCapacityMinutes/);
+  assert.match(page, /Рабочая ёмкость дня/);
+  assert.match(page, /ArrowDown/);
+  assert.match(page, /ArrowUp/);
+  assert.match(ios, /\.goal-area-switch/);
+  assert.match(ios, /\.goal-area-tabs/);
+  assert.match(ios, /\.capacity-picker/);
+  assert.match(ios, /\.capacity-settings/);
+});
