@@ -71,14 +71,14 @@ test("keeps calendar entries on real dates and habits readable on mobile", async
   assert.match(ios, /grid-template-columns:repeat\(7,minmax\(0,1fr\)\)/);
 });
 
-test("adds financial obligations calendar and calendar planning modes", async () => {
+test("adds a financial planning calendar and calendar planning modes", async () => {
   const [page, ios] = await Promise.all([
     source("app/page.tsx"),
     source("app/ios.css"),
   ]);
 
   assert.match(page, /function FinanceCalendar/);
-  assert.match(page, /Списания и кредитные платежи/);
+  assert.match(page, /Плановые расходы и платежи/);
   assert.match(page, /kind==="installment"/);
   assert.match(page, /type CalendarView="day"\|"week"\|"month"/);
   assert.match(page, /\["day","День"\]/);
@@ -377,4 +377,26 @@ test("keeps tiny expenses calm, splits saved transactions, and remembers merchan
   assert.match(ios, /\.small-expense-group/);
   assert.match(ios, /\.split-transaction-modal/);
   assert.match(ios, /\.transaction-split/);
+});
+
+test("filters the journal by wallet and keeps card settlement out of expenses", async () => {
+  const [page, importer, ios] = await Promise.all([
+    source("app/page.tsx"),
+    source("lib/bank-import.ts"),
+    source("app/ios.css"),
+  ]);
+
+  assert.match(page, /selectedAccountId/);
+  assert.match(page, /Расходы по источникам/);
+  assert.match(page, /Показать все счета/);
+  assert.match(page, /РАСХОДЫ ЗА МЕСЯЦ/);
+  assert.match(page, /Ring value=\{forecastPercent\}/);
+  assert.match(page, /деньги автоматически не списываются/i);
+  assert.doesNotMatch(page, /function settleDueInstallments/);
+  assert.doesNotMatch(page, /function applyDueRecurringExpenses/);
+  assert.match(importer, /isCardSettlement/);
+  assert.match(importer, /חיוב לכרטיס/);
+  assert.match(importer, /const chargeDate = purchaseDate/);
+  assert.match(ios, /\.forecast-ring \.ring\{flex:0 0 92px/);
+  assert.match(ios, /Wallet filter and statement-first finance flow/);
 });

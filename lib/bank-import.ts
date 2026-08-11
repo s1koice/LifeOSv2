@@ -158,13 +158,11 @@ function parseCardRows(rows: CellValue[][], fileName: string): { records: Parsed
   const transactionAmountIndex = headerIndex(headers, "סכום עסקה", "סכום בש\"ח");
   const chargedAmountIndex = headerIndex(headers, "סכום חיוב");
   const cardIndex = headerIndex(headers, "כרטיס");
-  const billingDateIndex = headerIndex(headers, "מועד חיוב");
   const typeIndex = headerIndex(headers, "סוג עסקה");
   const categoryIndex = headerIndex(headers, "ענף");
   const noteIndex = headerIndex(headers, "הערות");
   const detailed = chargedAmountIndex >= 0;
   const titleRow = rows.slice(0, headerRow).flat().map(cleanText).join(" ");
-  const statementBillingDate = excelDate(titleRow.match(/לחיוב\s+ב-?\s*(\d{1,2}[./-]\d{1,2}[./-]\d{2,4})/)?.[1] || "");
   const fileCard = (titleRow.match(/(?:מסתיים ב-|ויזה\s*)(\d{4})/) || fileName.match(/(\d{4})/))?.[1] || "";
   const records: ParsedRecord[] = [];
   let ignored = 0;
@@ -180,10 +178,7 @@ function parseCardRows(rows: CellValue[][], fileName: string): { records: Parsed
     const installment = installmentInfo(`${note} ${type}`);
     const chargedAmount = detailed ? Math.abs(rawCharged) : installment.count && installment.count > 1 ? roundMoney(originalAmount / installment.count) : originalAmount;
     if (!chargedAmount || installment.index === 0) { ignored += 1; return; }
-    const immediate = /חיוב מיידי/.test(`${note} ${type}`);
-    const chargeDate = detailed
-      ? (immediate ? purchaseDate : statementBillingDate || purchaseDate)
-      : excelDate(row[billingDateIndex]) || purchaseDate;
+    const chargeDate = purchaseDate;
     const cardLabel = cleanText(row[cardIndex]);
     const cardLast4 = (cardLabel.match(/(\d{4})/) || [])[1] || fileCard;
     const providerCategory = cleanText(row[categoryIndex]);
@@ -248,7 +243,7 @@ function parseBankRows(rows: CellValue[][], fileName: string) {
     const originalTitle = cleanText(row[titleIndex]);
     const signedAmount = numberValue(row[amountIndex]);
     if (!date || !originalTitle || !signedAmount) return;
-    const isCardSettlement = /חיוב לכרטיס|חיוב זמני למפתח מזומן/.test(originalTitle);
+    const isCardSettlement = /חיוב לכרטיס|חיוב זמני למפתח מזומן|תשלום.*כרטיס אשראי/.test(originalTitle);
     const isInternalTransfer = /חידוש פיקדון|פירעון פיקדון|הפקדת מזומן/.test(originalTitle);
     if (isCardSettlement || isInternalTransfer) { ignored += 1; return; }
     const category = categoryFromText(originalTitle);
