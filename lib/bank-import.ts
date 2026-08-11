@@ -17,6 +17,10 @@ export type BankImportRecord = {
   note?: string;
   installmentIndex?: number;
   installmentCount?: number;
+  originalAmount?: number;
+  billingDate?: string;
+  futureOnly?: boolean;
+  installmentSeriesId?: string;
 };
 
 export type BankImportResult = {
@@ -163,6 +167,7 @@ function parseCardRows(rows: CellValue[][], fileName: string): { records: Parsed
   const noteIndex = headerIndex(headers, "הערות");
   const detailed = chargedAmountIndex >= 0;
   const titleRow = rows.slice(0, headerRow).flat().map(cleanText).join(" ");
+  const billingDate = excelDate(titleRow);
   const fileCard = (titleRow.match(/(?:מסתיים ב-|ויזה\s*)(\d{4})/) || fileName.match(/(\d{4})/))?.[1] || "";
   const records: ParsedRecord[] = [];
   let ignored = 0;
@@ -176,8 +181,10 @@ function parseCardRows(rows: CellValue[][], fileName: string): { records: Parsed
     const type = cleanText(row[typeIndex]);
     if (!merchant || !purchaseDate || !originalAmount) return;
     const installment = installmentInfo(`${note} ${type}`);
-    const chargedAmount = detailed ? Math.abs(rawCharged) : installment.count && installment.count > 1 ? roundMoney(originalAmount / installment.count) : originalAmount;
-    if (!chargedAmount || installment.index === 0) { ignored += 1; return; }
+    const installmentAmount = installment.count && installment.count > 1 ? roundMoney(originalAmount / installment.count) : originalAmount;
+    const chargedAmount = detailed ? Math.abs(rawCharged) || installmentAmount : installmentAmount;
+    const futureOnly = installment.index === 0 && Boolean(installment.count && installment.count > 1);
+    if (!chargedAmount || (installment.index === 0 && !futureOnly)) { ignored += 1; return; }
     const chargeDate = purchaseDate;
     const cardLabel = cleanText(row[cardIndex]);
     const cardLast4 = (cardLabel.match(/(\d{4})/) || [])[1] || fileCard;
@@ -185,7 +192,8 @@ function parseCardRows(rows: CellValue[][], fileName: string): { records: Parsed
     const category = categoryFromText(merchant, providerCategory);
     const amountSigned = numberValue(row[transactionAmountIndex]);
     const kind = amountSigned < 0 || /זיכוי|החזר/.test(type) ? "income" : "expense";
-    const baseFingerprint = cardBaseFingerprint(chargeDate, cardLast4, merchant, chargedAmount);
+    const installmentSeriesId = cardBaseFingerprint(purchaseDate, cardLast4, merchant, originalAmount);
+    const baseFingerprint = `${installmentSeriesId}:installment-${installment.index ?? "single"}-of-${installment.count ?? 1}`;
     records.push({
       fileKey: fileName,
       baseFingerprint,
@@ -202,6 +210,10 @@ function parseCardRows(rows: CellValue[][], fileName: string): { records: Parsed
       note: [chargeDate !== purchaseDate ? `Дата покупки: ${purchaseDate}` : "", providerCategory, type, note].filter(Boolean).join(" · "),
       installmentIndex: installment.index,
       installmentCount: installment.count,
+      originalAmount: roundMoney(originalAmount),
+      billingDate: billingDate || purchaseDate,
+      futureOnly,
+      installmentSeriesId,
     });
     void rowOffset;
   });

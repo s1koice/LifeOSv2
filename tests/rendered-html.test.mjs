@@ -380,21 +380,39 @@ test("keeps finance controls readable in light mode and manages custom categorie
   assert.match(ios, /\.theme-light \.category-picker button/);
 });
 
-test("keeps tiny expenses calm, splits saved transactions, and remembers merchants", async () => {
+test("shows every expense, splits saved transactions, and remembers merchants", async () => {
   const [page, ios] = await Promise.all([
     source("app/page.tsx"),
     source("app/ios.css"),
   ]);
 
   assert.match(page, /function SplitTransactionModal/);
-  assert.match(page, /Мелкие расходы до 10 ₪/);
+  assert.doesNotMatch(page, /Мелкие расходы до 10 ₪/);
+  assert.match(page, /sort\(\(a,b\)=>b\.date\.localeCompare\(a\.date\)/);
   assert.match(page, /Разделить операцию/);
   assert.match(page, /parentId/);
   assert.match(page, /merchantMemory/);
   assert.match(ios, /Calm finance journal and transaction split/);
-  assert.match(ios, /\.small-expense-group/);
   assert.match(ios, /\.split-transaction-modal/);
   assert.match(ios, /\.transaction-split/);
+});
+
+test("imports future installments and tracks editable bank loans", async () => {
+  const [page, importer, ios] = await Promise.all([
+    source("app/page.tsx"),
+    source("lib/bank-import.ts"),
+    source("app/ios.css"),
+  ]);
+
+  assert.match(importer, /futureOnly/);
+  assert.match(importer, /billingDate/);
+  assert.match(importer, /installmentSeriesId/);
+  assert.match(page, /function createImportedTransactions/);
+  assert.match(page, /kind:"installment"/);
+  assert.match(page, /const seedLoans/);
+  assert.match(page, /function LoansSection/);
+  assert.match(page, /ОБЩИЙ ОСТАТОК/);
+  assert.match(ios, /\.loans-grid/);
 });
 
 test("filters the journal by wallet and keeps card settlement out of expenses", async () => {
