@@ -361,3 +361,20 @@ test("keeps finance controls readable in light mode and manages custom categorie
   assert.match(ios, /\.theme-light \.number-pad button/);
   assert.match(ios, /\.theme-light \.category-picker button/);
 });
+
+test("keeps tiny expenses calm, splits saved transactions, and remembers merchants", async () => {
+  const [page, ios] = await Promise.all([
+    source("app/page.tsx"),
+    source("app/ios.css"),
+  ]);
+
+  assert.match(page, /function SplitTransactionModal/);
+  assert.match(page, /Мелкие расходы до 10 ₪/);
+  assert.match(page, /Разделить операцию/);
+  assert.match(page, /parentId/);
+  assert.match(page, /merchantMemory/);
+  assert.match(ios, /Calm finance journal and transaction split/);
+  assert.match(ios, /\.small-expense-group/);
+  assert.match(ios, /\.split-transaction-modal/);
+  assert.match(ios, /\.transaction-split/);
+});
