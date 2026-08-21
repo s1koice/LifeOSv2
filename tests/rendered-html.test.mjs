@@ -329,8 +329,8 @@ test("imports Discount and Visa files with Russian categories and duplicate prot
     source("package.json"),
   ]);
 
-  assert.match(page, /function BankImportModal/);
-  assert.match(page, /AI‑импорт/);
+  assert.match(page, /function FinanceImportModal/);
+  assert.match(page, /ФИНАНСЫ · УМНЫЙ ИМПОРТ/);
   assert.match(page, /Двойной учёт выключен/);
   assert.match(page, /importFingerprint/);
   assert.match(importer, /export async function parseBankFiles/);
@@ -395,10 +395,43 @@ test("adds project editing and a finance control center with AI image import", a
   assert.match(page, /category-editor sortable/);
   assert.match(page, /Сохранить порядок/);
   assert.match(route, /input_image/);
-  assert.match(route, /extract_finance_transactions/);
+  assert.match(route, /reconcile_finance_data/);
   assert.match(route, /OPENAI_FINANCE_MODEL/);
   assert.match(ios, /category-drag/);
   assert.match(ios, /journal-pagination/);
+});
+
+test("audits existing finance data and applies reversible AI corrections", async () => {
+  const [page, assistant, analyzer, ios] = await Promise.all([
+    source("app/page.tsx"),
+    source("app/api/assistant/route.ts"),
+    source("app/api/finance/analyze/route.ts"),
+    source("app/ios.css"),
+  ]);
+
+  assert.match(page, /update_finance_transaction/);
+  assert.match(page, /delete_finance_transaction/);
+  assert.match(page, /update_loan/);
+  assert.match(page, /update_budget_line/);
+  assert.match(page, /update_account_balance/);
+  assert.match(page, /transactionUpdates/);
+  assert.match(page, /loanUpdates/);
+  assert.match(page, /Проверить AI/);
+  assert.match(page, /finance-view-tabs/);
+  assert.match(page, /Обзор/);
+  assert.match(page, /Операции/);
+  assert.match(page, /План/);
+  assert.match(assistant, /финансовый аудитор/);
+  assert.match(assistant, /update_finance_transaction/);
+  assert.match(assistant, /delete_finance_transaction/);
+  assert.match(assistant, /update_loan/);
+  assert.match(assistant, /create_loan/);
+  assert.match(analyzer, /candidateUpdates/);
+  assert.match(analyzer, /transactionUpdates/);
+  assert.match(analyzer, /loanUpdates/);
+  assert.match(ios, /Clearer type scale and simplified finance workspace/);
+  assert.match(ios, /\.text-extra/);
+  assert.match(ios, /\.finance-view-tabs/);
 });
 
 test("shows every expense, splits saved transactions, and remembers merchants", async () => {
