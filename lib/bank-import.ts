@@ -7,9 +7,9 @@ export type BankImportRecord = {
   originalTitle: string;
   category: string;
   amount: number;
-  kind: "expense" | "income";
+  kind: "expense" | "income" | "transfer";
   source: string;
-  sourceType: "bank" | "card-details" | "card-history";
+  sourceType: "bank" | "card-details" | "card-history" | "ai-image";
   accountHint: string;
   cardLast4?: string;
   fingerprint: string;
@@ -363,7 +363,7 @@ export async function parseBankFiles(files: File[]): Promise<BankImportResult> {
     occurrence.set(counterKey, rowOccurrence);
     return { ...record, id: `${index}-${rowOccurrence}`, fingerprint: `${record.baseFingerprint}:row${rowOccurrence}` };
   });
-  const priority = { "card-details": 3, "card-history": 2, bank: 1 } as const;
+  const priority = { "ai-image": 4, "card-details": 3, "card-history": 2, bank: 1 } as const;
   const unique = new Map<string, BankImportRecord>();
   withFingerprints.forEach(record => {
     const current = unique.get(record.fingerprint);

@@ -36,7 +36,7 @@ test("implements PARA inbox, resources, area standards and linked project work",
   assert.match(page, /projectId:\s*selected\.id|projectId}/);
   assert.match(page, /ЕЖЕНЕДЕЛЬНЫЙ ОБЗОР/);
   assert.match(page, /Стандарт сферы/);
-  assert.match(page, /Этапы результата/);
+  assert.match(page, /Контрольные точки проекта/);
   assert.match(page, /inboxItems, resources/);
 });
 
@@ -78,7 +78,7 @@ test("adds a financial planning calendar and calendar planning modes", async () 
   ]);
 
   assert.match(page, /function FinanceCalendar/);
-  assert.match(page, /Плановые расходы и платежи/);
+  assert.match(page, /Факт, списания и кредиты по датам/);
   assert.match(page, /kind==="installment"/);
   assert.match(page, /type CalendarView="day"\|"week"\|"month"/);
   assert.match(page, /\["day","День"\]/);
@@ -330,8 +330,8 @@ test("imports Discount and Visa files with Russian categories and duplicate prot
   ]);
 
   assert.match(page, /function BankImportModal/);
-  assert.match(page, /Импорт банка/);
-  assert.match(page, /Защита от двойного учёта включена/);
+  assert.match(page, /AI‑импорт/);
+  assert.match(page, /Двойной учёт выключен/);
   assert.match(page, /importFingerprint/);
   assert.match(importer, /export async function parseBankFiles/);
   assert.match(importer, /utf-16le/);
@@ -371,13 +371,34 @@ test("keeps finance controls readable in light mode and manages custom categorie
   assert.match(page, /＋ Добавить или изменить/);
   assert.match(page, /function renameFinanceCategory/);
   assert.match(page, /function deleteFinanceCategory/);
-  assert.match(page, /Сохранить категории/);
+  assert.match(page, /Сохранить порядок/);
   assert.match(page, /Такая категория уже существует/);
   assert.match(ios, /Finance operation and editable categories/);
   assert.match(ios, /\.theme-light \.finance-kind button/);
   assert.match(ios, /\.theme-light \.amount-screen/);
   assert.match(ios, /\.theme-light \.number-pad button/);
   assert.match(ios, /\.theme-light \.category-picker button/);
+});
+
+test("adds project editing and a finance control center with AI image import", async () => {
+  const [page, route, ios] = await Promise.all([
+    source("app/page.tsx"),
+    source("app/api/finance/analyze/route.ts"),
+    source("app/ios.css"),
+  ]);
+
+  assert.match(page, /Редактировать проект/);
+  assert.match(page, /Контрольные точки проекта/);
+  assert.match(page, /по 50 на странице/);
+  assert.match(page, /function duplicateTransactionIds/);
+  assert.match(page, /Реальный баланс/);
+  assert.match(page, /category-editor sortable/);
+  assert.match(page, /Сохранить порядок/);
+  assert.match(route, /input_image/);
+  assert.match(route, /extract_finance_transactions/);
+  assert.match(route, /OPENAI_FINANCE_MODEL/);
+  assert.match(ios, /category-drag/);
+  assert.match(ios, /journal-pagination/);
 });
 
 test("shows every expense, splits saved transactions, and remembers merchants", async () => {
