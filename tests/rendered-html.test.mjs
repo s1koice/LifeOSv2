@@ -570,3 +570,20 @@ test("reviews uncertain bank categories after import", async () => {
   assert.match(ios, /\.finance-reconciliation/);
   assert.match(ios, /\.reconciliation-list/);
 });
+
+test("starts with compact tasks, habits and a direct inbox capture", async () => {
+  const [page, ios] = await Promise.all([
+    source("app/page.tsx"),
+    source("app/ios.css"),
+  ]);
+
+  assert.match(page, /defaultDashboardOrder: DashboardBlockId\[\] = \["today", "habits", "focus"/);
+  assert.match(page, /dashboardLayoutVersion = 2/);
+  assert.match(page, /Быстро во Входящие/);
+  assert.match(page, /onInboxCapture/);
+  assert.match(page, /Настроить главную/);
+  assert.match(page, /compact-focus-card/);
+  assert.match(ios, /\.dashboard-launchpad/);
+  assert.match(ios, /\.dashboard-capture/);
+  assert.match(ios, /\.dashboard-widget\.half \.smart-load/);
+});
