@@ -124,7 +124,7 @@ test("supports a reorderable dashboard, light iOS theme and live gamification", 
   assert.match(page, /data-dashboard-widget/);
   assert.match(page, /text\/nexus-dashboard/);
   assert.match(page, /dashboardOrder, gamification/);
-  assert.match(page, /type Theme = "lime" \| "orbit" \| "light"/);
+  assert.match(page, /type Theme = "midnight" \| "lime" \| "orbit" \| "light"/);
   assert.match(page, /Светлая iOS/);
   assert.match(page, /function addGameEvents/);
   assert.match(page, /missed-deadline/);
@@ -432,6 +432,26 @@ test("audits existing finance data and applies reversible AI corrections", async
   assert.match(ios, /Clearer type scale and simplified finance workspace/);
   assert.match(ios, /\.text-extra/);
   assert.match(ios, /\.finance-view-tabs/);
+});
+
+test("adds the Midnight iOS design and visual finance statistics", async () => {
+  const [page, ios] = await Promise.all([
+    source("app/page.tsx"),
+    source("app/ios.css"),
+  ]);
+
+  assert.match(page, /type Theme = "midnight"/);
+  assert.match(page, /nexus-design-v5/);
+  assert.match(page, /function FinanceVisualOverview/);
+  assert.match(page, /finance-segmented-donut/);
+  assert.match(page, /finance-bank-card/);
+  assert.match(page, /finance-spark-bars/);
+  assert.match(page, /Новый тёмный iOS-дизайн/);
+  assert.match(ios, /NEXUS Midnight/);
+  assert.match(ios, /\.theme-midnight/);
+  assert.match(ios, /\.finance-visual-overview/);
+  assert.match(ios, /\.finance-cashflow/);
+  assert.match(ios, /\.theme-midnight \.ios-tabbar/);
 });
 
 test("shows every expense, splits saved transactions, and remembers merchants", async () => {
