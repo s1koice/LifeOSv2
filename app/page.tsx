@@ -3,6 +3,7 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { loadPinCloudState, readPinSession, savePinCloudState, signInWithPin, signOutPin, type PinSession } from "@/lib/pin-cloud";
 import { parseBankFiles, type BankImportRecord } from "@/lib/bank-import";
+import { buildAgenticContext, buildEntityLinks, runAgenticSkill, type AgentActionLog, type AgenticBrief, type AgenticSkill, type AgentMemory, type AgentSuggestion, type EntityLink, type RoutineRun } from "@/lib/agentic";
 
 type Section = "Обзор" | "Задачи" | "Цели" | "Проекты" | "Привычки" | "Финансы" | "Здоровье" | "Планирование" | "Журнал" | "Настройки";
 type Priority = "high" | "medium" | "low";
@@ -489,6 +490,13 @@ export default function Home() {
   const [gamification, setGamification] = useState<GamificationState>(seedGamification);
   const [profile, setProfile] = useState<UserProfile>({ name: "Алексей", textScale: "extra", dailyCapacityMinutes: 360 });
   const [focusSessions, setFocusSessions] = useState<FocusSession[]>([]);
+  const [agentMemory, setAgentMemory] = useState<AgentMemory[]>([]);
+  const [agentSuggestions, setAgentSuggestions] = useState<AgentSuggestion[]>([]);
+  const [agentActionLog, setAgentActionLog] = useState<AgentActionLog[]>([]);
+  const [agentLinks, setAgentLinks] = useState<EntityLink[]>([]);
+  const [routineRuns, setRoutineRuns] = useState<RoutineRun[]>([]);
+  const [operatorBrief, setOperatorBrief] = useState<AgenticBrief | null>(null);
+  const [agenticBusy, setAgenticBusy] = useState(false);
   const [focusTaskId, setFocusTaskId] = useState<number | null>(null);
   const [assistantOpen, setAssistantOpen] = useState(false);
   const [authOpen, setAuthOpen] = useState(false);
@@ -512,6 +520,7 @@ export default function Home() {
   const authSessionRef = useRef<PinSession | null>(null);
   const statePayloadRef = useRef<Record<string, unknown>>({});
   const lastCloudUpdatedRef = useRef("");
+  const agenticRoutineStartingRef = useRef(false);
 
   const applyStoredState = useCallback((parsed: Record<string, unknown>) => {
     const storedHistory = Array.isArray(parsed.habitHistory) ? parsed.habitHistory as HabitHistory[] : [];
@@ -543,6 +552,12 @@ export default function Home() {
       setProfile({ name: typeof next.name === "string" && next.name.trim() ? next.name.trim() : "Алексей", textScale: next.textScale === "normal" || next.textScale === "large" ? next.textScale : "extra", dailyCapacityMinutes: [240,360,480].includes(Number(next.dailyCapacityMinutes)) ? Number(next.dailyCapacityMinutes) : 360 });
     }
     if (Array.isArray(parsed.focusSessions)) setFocusSessions(uniqueEntityIds(parsed.focusSessions as FocusSession[]));
+    if (Array.isArray(parsed.agentMemory)) setAgentMemory((parsed.agentMemory as AgentMemory[]).slice(0, 200));
+    if (Array.isArray(parsed.agentSuggestions)) setAgentSuggestions((parsed.agentSuggestions as AgentSuggestion[]).slice(0, 100));
+    if (Array.isArray(parsed.agentActionLog)) setAgentActionLog((parsed.agentActionLog as AgentActionLog[]).slice(0, 300));
+    if (Array.isArray(parsed.agentLinks)) setAgentLinks((parsed.agentLinks as EntityLink[]).slice(0, 1000));
+    if (Array.isArray(parsed.routineRuns)) setRoutineRuns((parsed.routineRuns as RoutineRun[]).slice(0, 120));
+    if (parsed.operatorBrief && typeof parsed.operatorBrief === "object") setOperatorBrief(parsed.operatorBrief as AgenticBrief);
     setDashboardOrder(Number(parsed.dashboardLayoutVersion) >= dashboardLayoutVersion ? normalizeDashboardOrder(parsed.dashboardOrder) : defaultDashboardOrder);
     setGamification(normalizeGamification(parsed.gamification));
   }, [setTasks, setProjects, setInboxItems, setResources, setGoals, setLifeAreas, setFinanceCategories, setBudgetLines, setHabits, setHabitHistory, setAccounts, setTransactions, setRecurringExpenses, setEvents, setPlanningFocuses, setHealthNotes, setJournalEntries, setWeeklyReviews, setDashboardOrder, setGamification]);
@@ -568,8 +583,60 @@ export default function Home() {
     return () => window.clearTimeout(timer);
   }, [applyStoredState]);
 
-  const statePayload = useMemo<Record<string, unknown>>(() => ({ dashboardLayoutVersion, tasks, projects, inboxItems, resources, goals, habits, lifeAreas, financeCategories, budgetLines, recurringExpenses, loans, habitHistory, accounts, transactions, events, planningFocuses, planningNote: planningFocuses[localDateKey(startOfWeek(new Date()))] || "", healthNotes, journalEntries, weeklyReviews, dashboardOrder, gamification, profile, focusSessions }), [tasks, projects, inboxItems, resources, goals, habits, lifeAreas, financeCategories, budgetLines, recurringExpenses, loans, habitHistory, accounts, transactions, events, planningFocuses, healthNotes, journalEntries, weeklyReviews, dashboardOrder, gamification, profile, focusSessions]);
+  const statePayload = useMemo<Record<string, unknown>>(() => ({ dashboardLayoutVersion, tasks, projects, inboxItems, resources, goals, habits, lifeAreas, financeCategories, budgetLines, recurringExpenses, loans, habitHistory, accounts, transactions, events, planningFocuses, planningNote: planningFocuses[localDateKey(startOfWeek(new Date()))] || "", healthNotes, journalEntries, weeklyReviews, dashboardOrder, gamification, profile, focusSessions, agentMemory, agentSuggestions, agentActionLog, agentLinks, routineRuns, operatorBrief }), [tasks, projects, inboxItems, resources, goals, habits, lifeAreas, financeCategories, budgetLines, recurringExpenses, loans, habitHistory, accounts, transactions, events, planningFocuses, healthNotes, journalEntries, weeklyReviews, dashboardOrder, gamification, profile, focusSessions, agentMemory, agentSuggestions, agentActionLog, agentLinks, routineRuns, operatorBrief]);
   useEffect(() => { statePayloadRef.current = statePayload; }, [statePayload]);
+
+  const agenticContext = useMemo(() => buildAgenticContext({
+    today: localDateKey(new Date()),
+    tasks,
+    projects,
+    goals,
+    habits,
+    health: healthNotes,
+    transactions,
+    journals: journalEntries,
+    inbox: inboxItems,
+    budgetTotal: budgetLines.reduce((sum, line) => sum + line.limit, 0),
+    inboxCount: inboxItems.filter(item => item.status !== "organized").length,
+    previousReviews: weeklyReviews.map(review => ({ weekStart: review.weekStart, focus: review.focus, completedAt: review.completedAt })),
+    savedMemory: agentMemory,
+  }), [tasks, projects, goals, habits, healthNotes, transactions, journalEntries, budgetLines, inboxItems, weeklyReviews, agentMemory]);
+  const visibleOperatorBrief = useMemo(() => operatorBrief?.date === agenticContext.today ? operatorBrief : runAgenticSkill("morning", agenticContext), [operatorBrief, agenticContext]);
+
+  const adoptAgenticBrief = useCallback((brief: AgenticBrief, source: "routine" | "manual") => {
+    setOperatorBrief(brief);
+    setAgentLinks(buildEntityLinks(agenticContext));
+    setAgentSuggestions(current => [...brief.suggestions, ...current.filter(item => !(item.skill === brief.skill && item.createdAt.slice(0, 10) === brief.date && item.status === "pending"))].slice(0, 100));
+    setAgentMemory(current => {
+      const known = new Set(current.map(item => item.content));
+      return [...brief.memoryCandidates.filter(item => !known.has(item.content)), ...current].slice(0, 200);
+    });
+    const run: RoutineRun = { id: `run-${Date.now()}`, skill: brief.skill, date: brief.date, createdAt: new Date().toISOString(), source, provider: brief.provider || "rules" };
+    const logEntry: AgentActionLog = { id: `log-${Date.now()}`, createdAt: new Date().toISOString(), skill: brief.skill, stage: "analyzed", title: brief.summary, details: `Проанализировано сигналов: ${brief.attention.length}. Предложений: ${brief.suggestions.length}. Провайдер: ${brief.provider || "rules"}.` };
+    setRoutineRuns(current => [run, ...current.filter(item => !(item.skill === brief.skill && item.date === brief.date && item.source === source))].slice(0, 120));
+    setAgentActionLog(current => [logEntry, ...current].slice(0, 300));
+  }, [agenticContext]);
+
+  const runOperator = useCallback(async (skill: AgenticSkill, source: "routine" | "manual" = "manual") => {
+    if (agenticBusy) return;
+    setAgenticBusy(true);
+    const fallback = runAgenticSkill(skill, agenticContext);
+    try {
+      const response = await fetch("/api/agentic", { method: "POST", headers: { "Content-Type": "application/json", ...(byok ? { "x-nexus-byok": byok } : {}) }, body: JSON.stringify({ skill, context: agenticContext }) });
+      const data = await response.json() as { brief?: AgenticBrief };
+      adoptAgenticBrief(data.brief || fallback, source);
+    } catch { adoptAgenticBrief(fallback, source); }
+    finally { setAgenticBusy(false); agenticRoutineStartingRef.current = false; }
+  }, [agenticBusy, agenticContext, byok, adoptAgenticBrief]);
+
+  useEffect(() => {
+    if (!loaded || agenticBusy || agenticRoutineStartingRef.current) return;
+    const today = localDateKey(new Date());
+    if (routineRuns.some(run => run.skill === "morning" && run.date === today && run.source === "routine")) return;
+    agenticRoutineStartingRef.current = true;
+    const timer = window.setTimeout(() => void runOperator("morning", "routine"), 0);
+    return () => window.clearTimeout(timer);
+  }, [loaded, agenticBusy, routineRuns, runOperator]);
 
   useEffect(() => {
     if (loaded) localStorage.setItem("nexus-state", JSON.stringify(statePayload));
@@ -818,6 +885,47 @@ export default function Home() {
     setHabits(current => current.map(h => h.id === id ? { ...h, checks: { ...h.checks, [date]: !h.checks[date] } } : h));
   }
 
+  function recordAgenticAction(entry: Omit<AgentActionLog, "id" | "createdAt">) {
+    setAgentActionLog(current => [{ ...entry, id: `log-${newEntityId()}`, createdAt: new Date().toISOString() }, ...current].slice(0, 300));
+  }
+
+  function acceptAgentSuggestion(id: string) {
+    const suggestion = agentSuggestions.find(item => item.id === id); if (!suggestion || suggestion.status !== "pending") return;
+    const { action } = suggestion;
+    if (action.type === "schedule_today" && action.targetId) setTasks(current => current.map(task => task.id === action.targetId ? { ...task, dueDate: clock.today } : task));
+    if (action.type === "create_task") setTasks(current => [...current, { id: newEntityId(), title: String(action.payload?.title || "Новый следующий шаг"), area: String(action.payload?.area || "Личное"), projectId: Number(action.payload?.projectId || 0) || undefined, time: "Сегодня", dueDate: clock.today, done: false, priority: "medium", duration: 30, energy: "medium", context: "anywhere", createdAt: new Date().toISOString() }]);
+    if (action.type === "create_journal") setJournalEntries(current => [{ id: newEntityId(), date: new Date().toISOString(), mood: 3, answers: [String(action.payload?.note || suggestion.reason), "", "", ""] }, ...current]);
+    if (action.type === "organize_inbox" && action.targetId) {
+      const kind = String(action.payload?.kind || "task"); const title = String(action.payload?.title || "Новая запись"); const area = String(action.payload?.area || "Личное");
+      if (kind === "project") setProjects(current => [...current, { id: newEntityId(), name: title, area, progress: 0, due: "Без срока", next: "Определить следующий шаг", milestones: [] }]);
+      else if (kind === "resource") setResources(current => [...current, { id: newEntityId(), title, kind: "link", area, note: "Сохранено Daily Operator из Входящих", url: String(action.payload?.url || "") }]);
+      else setTasks(current => [...current, { id: newEntityId(), title, area, time: "Входящие", done: false, priority: "medium", duration: 30, energy: "medium", context: "anywhere", createdAt: new Date().toISOString() }]);
+      setInboxItems(current => current.map(item => item.id === action.targetId ? { ...item, status: "organized", destination: kind === "project" ? "project" : kind === "resource" ? "resource" : "task", resultTitle: title } : item));
+    }
+    if (action.type === "open_section" || action.type === "schedule_today" || action.type === "create_task" || action.type === "organize_inbox") navigate(action.section);
+    setAgentSuggestions(current => current.map(item => item.id === id ? { ...item, status: "accepted" } : item));
+    recordAgenticAction({ skill: suggestion.skill, stage: "executed", title: action.label, details: `${suggestion.title}. Причина: ${suggestion.reason}` });
+    notify("Предложение Daily Operator выполнено");
+  }
+
+  function dismissAgentSuggestion(id: string) {
+    const suggestion = agentSuggestions.find(item => item.id === id); if (!suggestion) return;
+    setAgentSuggestions(current => current.map(item => item.id === id ? { ...item, status: "dismissed" } : item));
+    recordAgenticAction({ skill: suggestion.skill, stage: "dismissed", title: suggestion.title, details: suggestion.reason });
+  }
+
+  function askAboutAgentSuggestion(id: string) {
+    const suggestion = agentSuggestions.find(item => item.id === id); if (!suggestion) return;
+    setPrompt(`Объясни это предложение Daily Operator и предложи самый простой вариант действия: ${suggestion.title}. Причина: ${suggestion.reason}. Данные: ${suggestion.evidence}`);
+    setAssistantOpen(true);
+  }
+
+  function evaluateAgentMemory(id: string, status: "saved" | "discarded") {
+    const memory = agentMemory.find(item => item.id === id); if (!memory) return;
+    setAgentMemory(current => current.map(item => item.id === id ? { ...item, status } : item));
+    recordAgenticAction({ skill: "assistant", stage: "memory", title: status === "saved" ? "Наблюдение сохранено в память" : "Кандидат памяти отклонён", details: memory.content });
+  }
+
   function createFinanceOperation(draft: Record<string, unknown>) {
     const accountId = Number(draft.accountId); const amount = Number(draft.amount); const kind = String(draft.kind) as "income" | "expense";
     const account = accounts.find(a => a.id === accountId); if (!account || !amount) return;
@@ -915,7 +1023,10 @@ export default function Home() {
         applied++;
       }
     });
-    if (applied) notify(`NEXUS AI выполнил действий: ${applied}`);
+    if (applied) {
+      notify(`NEXUS AI выполнил действий: ${applied}`);
+      recordAgenticAction({ skill: "assistant", stage: "executed", title: `NEXUS AI выполнил ${applied} действий`, details: actions.map(action => action.type).join(" · ") });
+    }
     return applied;
   }
 
@@ -936,7 +1047,7 @@ export default function Home() {
   function deleteFinanceCategory(name:string){const fallback=financeCategories.find(item=>item.name==="Другое"&&item.name!==name)?.name||financeCategories.find(item=>item.name!==name)?.name||"Другое";setTransactions(current=>current.map(item=>item.category===name?{...item,category:fallback}:item));setBudgetLines(current=>current.filter(item=>item.category!==name));setRecurringExpenses(current=>current.map(item=>item.category===name?{...item,category:fallback}:item))}
 
   function content() {
-    if (section === "Обзор") return <Dashboard userName={profile.name} tasks={tasks} habits={habits} projects={projects} goals={goals} lifeAreas={lifeAreas} events={events} transactions={transactions} budgetLines={budgetLines} weeklyReviews={weeklyReviews} focusSessions={focusSessions} inboxItems={inboxItems} journalEntries={journalEntries} dailyCapacity={profile.dailyCapacityMinutes||360} onDailyCapacity={minutes=>setProfile(current=>({...current,dailyCapacityMinutes:minutes}))} taskCompletion={taskCompletion} habitCompletion={habitCompletion} today={clock.today} onToggleTask={toggleTask} onToggleHabit={toggleHabit} onStartFocus={setFocusTaskId} navigate={navigate} order={dashboardOrder} setOrder={setDashboardOrder} gamification={gamification} onGameCheckIn={gameCheckIn} onInboxCapture={title=>{setInboxItems(current=>[{id:newEntityId(),title:title.trim(),kind:"task",createdAt:new Date().toISOString(),status:"new"},...current]);notify("Добавлено во Входящие")}} onPlanWithAi={()=>{setPrompt("Спланируй сегодняшний день: выбери реалистичные приоритеты, назначь время с учётом длительности, энергии и контекста и сразу внеси изменения");setAssistantOpen(true)}}/>;
+    if (section === "Обзор") return <Dashboard userName={profile.name} tasks={tasks} habits={habits} projects={projects} goals={goals} lifeAreas={lifeAreas} events={events} transactions={transactions} budgetLines={budgetLines} weeklyReviews={weeklyReviews} focusSessions={focusSessions} inboxItems={inboxItems} journalEntries={journalEntries} dailyCapacity={profile.dailyCapacityMinutes||360} onDailyCapacity={minutes=>setProfile(current=>({...current,dailyCapacityMinutes:minutes}))} taskCompletion={taskCompletion} habitCompletion={habitCompletion} today={clock.today} onToggleTask={toggleTask} onToggleHabit={toggleHabit} onStartFocus={setFocusTaskId} navigate={navigate} order={dashboardOrder} setOrder={setDashboardOrder} gamification={gamification} onGameCheckIn={gameCheckIn} brief={visibleOperatorBrief} agenticBusy={agenticBusy} suggestions={agentSuggestions.filter(item=>item.status==="pending")} memory={agentMemory} actionLog={agentActionLog} links={agentLinks} routineRuns={routineRuns} onRunSkill={skill=>void runOperator(skill,"manual")} onAcceptSuggestion={acceptAgentSuggestion} onDismissSuggestion={dismissAgentSuggestion} onAskSuggestion={askAboutAgentSuggestion} onEvaluateMemory={evaluateAgentMemory} onInboxCapture={title=>{setInboxItems(current=>[{id:newEntityId(),title:title.trim(),kind:"task",createdAt:new Date().toISOString(),status:"new"},...current]);notify("Добавлено во Входящие")}} onPlanWithAi={()=>{setPrompt("Спланируй сегодняшний день: выбери реалистичные приоритеты, назначь время с учётом длительности, энергии и контекста и сразу внеси изменения");setAssistantOpen(true)}}/>;
     if (section === "Задачи") return <TasksPage tasks={tasks} projects={projects} goals={goals} focusSessions={focusSessions} setTasks={setTasks} onNew={() => { setEditingTask(null); setTaskProjectId(null); setModalKind("task"); }} onEdit={task => { setEditingTask(task); setTaskProjectId(task.projectId || null); setModalKind("task"); }}/>;
     if (section === "Цели") return <GoalsPage goals={goals} setGoals={setGoals} projects={projects} tasks={tasks} setTasks={setTasks} onNew={() => { setEditingGoal(null); setModalKind("goal"); }} onEdit={goal => { setEditingGoal(goal); setModalKind("goal"); }}/>;
     if (section === "Проекты") return <ProjectsPage projects={projects} setProjects={setProjects} tasks={tasks} setTasks={setTasks} goals={goals} lifeAreas={lifeAreas} setLifeAreas={setLifeAreas} inboxItems={inboxItems.filter(item=>item.status!=="organized")} setInboxItems={setInboxItems} resources={resources} setResources={setResources} weeklyReviews={weeklyReviews} setWeeklyReviews={setWeeklyReviews} planningFocuses={planningFocuses} setPlanningFocuses={setPlanningFocuses} notify={notify} selectedId={selectedProjectId} setSelectedId={setSelectedProjectId} onNew={() => { setEditingProject(null); setModalKind("project"); }} onEdit={project => { setEditingProject(project); setModalKind("project"); }} onNewTask={projectId => { setEditingTask(null); setTaskProjectId(projectId); setModalKind("task"); }} onSmartCapture={smartCapture} smartCaptureBusy={smartCaptureBusy}/>;
@@ -967,7 +1078,7 @@ export default function Home() {
   </div>;
 }
 
-function Dashboard({userName,tasks,habits,projects,goals,lifeAreas,events,transactions,budgetLines,weeklyReviews,focusSessions,inboxItems,journalEntries,dailyCapacity,onDailyCapacity,taskCompletion,habitCompletion,today,onToggleTask,onToggleHabit,onStartFocus,navigate,order,setOrder,gamification,onGameCheckIn,onInboxCapture,onPlanWithAi}:{userName:string;tasks:Task[];habits:Habit[];projects:Project[];goals:Goal[];lifeAreas:LifeArea[];events:CalendarEvent[];transactions:Transaction[];budgetLines:BudgetLine[];weeklyReviews:ParaWeeklyReview[];focusSessions:FocusSession[];inboxItems:InboxItem[];journalEntries:JournalEntry[];dailyCapacity:number;onDailyCapacity:(minutes:number)=>void;taskCompletion:number;habitCompletion:number;today:string;onToggleTask:(id:number)=>void;onToggleHabit:(id:number,date:string)=>void;onStartFocus:(id:number)=>void;navigate:(s:Section)=>void;order:DashboardBlockId[];setOrder:React.Dispatch<React.SetStateAction<DashboardBlockId[]>>;gamification:GamificationState;onGameCheckIn:(kind:"setback"|"recovery")=>void;onInboxCapture:(title:string)=>void;onPlanWithAi:()=>void}) {
+function Dashboard({userName,tasks,habits,projects,goals,lifeAreas,events,transactions,budgetLines,weeklyReviews,focusSessions,inboxItems,journalEntries,dailyCapacity,onDailyCapacity,taskCompletion,habitCompletion,today,onToggleTask,onToggleHabit,onStartFocus,navigate,order,setOrder,gamification,onGameCheckIn,brief,agenticBusy,suggestions,memory,actionLog,links,routineRuns,onRunSkill,onAcceptSuggestion,onDismissSuggestion,onAskSuggestion,onEvaluateMemory,onInboxCapture,onPlanWithAi}:{userName:string;tasks:Task[];habits:Habit[];projects:Project[];goals:Goal[];lifeAreas:LifeArea[];events:CalendarEvent[];transactions:Transaction[];budgetLines:BudgetLine[];weeklyReviews:ParaWeeklyReview[];focusSessions:FocusSession[];inboxItems:InboxItem[];journalEntries:JournalEntry[];dailyCapacity:number;onDailyCapacity:(minutes:number)=>void;taskCompletion:number;habitCompletion:number;today:string;onToggleTask:(id:number)=>void;onToggleHabit:(id:number,date:string)=>void;onStartFocus:(id:number)=>void;navigate:(s:Section)=>void;order:DashboardBlockId[];setOrder:React.Dispatch<React.SetStateAction<DashboardBlockId[]>>;gamification:GamificationState;onGameCheckIn:(kind:"setback"|"recovery")=>void;brief:AgenticBrief;agenticBusy:boolean;suggestions:AgentSuggestion[];memory:AgentMemory[];actionLog:AgentActionLog[];links:EntityLink[];routineRuns:RoutineRun[];onRunSkill:(skill:AgenticSkill)=>void;onAcceptSuggestion:(id:string)=>void;onDismissSuggestion:(id:string)=>void;onAskSuggestion:(id:string)=>void;onEvaluateMemory:(id:string,status:"saved"|"discarded")=>void;onInboxCapture:(title:string)=>void;onPlanWithAi:()=>void}) {
   const totalScore=Math.round((taskCompletion+habitCompletion)/2);
   const[editing,setEditing]=useState(false);const[dragging,setDragging]=useState<DashboardBlockId|null>(null);const[pointerDragging,setPointerDragging]=useState<DashboardBlockId|null>(null);const[inboxDraft,setInboxDraft]=useState("");
   const level=gameLevel(gamification.xp);const streak=gameStreak(gamification.activeDays);const todayEvents=gamification.events.filter(event=>event.date===today);const todayDelta=todayEvents.reduce((sum,event)=>sum+event.delta,0);const lastScore=gamification.dailyScores[gamification.dailyScores.length-1];
@@ -999,13 +1110,36 @@ function Dashboard({userName,tasks,habits,projects,goals,lifeAreas,events,transa
   };
   return <>
     <section className="hero-row compact-hero"><div><span className="eyebrow">{new Date().toLocaleDateString("ru-RU",{weekday:"long",day:"numeric",month:"long"}).toUpperCase()}</span><h1>Доброе утро, {userName} <span>✦</span></h1><p>Сначала зафиксируйте мысль, затем сделайте главное.</p></div><div className="day-score"><Ring value={totalScore} color="var(--lime)" size={66}/><div><small>БАЛАНС ДНЯ</small><strong>{totalScore>=70?"Уверенный ритм":"Есть пространство для роста"}</strong><span>задачи + привычки</span></div></div></section>
+    <AgenticCommandCenter brief={brief} busy={agenticBusy} suggestions={suggestions} memory={memory} actionLog={actionLog} links={links} routineRuns={routineRuns} navigate={navigate} onRunSkill={onRunSkill} onAccept={onAcceptSuggestion} onDismiss={onDismissSuggestion} onAsk={onAskSuggestion} onEvaluateMemory={onEvaluateMemory}/>
     <section className="dashboard-launchpad" aria-label="Быстрый старт">
       <form className="dashboard-capture" onSubmit={event=>{event.preventDefault();const title=inboxDraft.trim();if(!title)return;onInboxCapture(title);setInboxDraft("")}}><span>＋</span><label><strong>Быстро во Входящие</strong><input value={inboxDraft} onChange={event=>setInboxDraft(event.target.value)} placeholder="Задача, мысль или напоминание…" aria-label="Добавить запись во Входящие"/></label><button type="submit" disabled={!inboxDraft.trim()}>Добавить</button></form>
       <div className="dashboard-shortcuts"><button type="button" onClick={()=>navigate("Задачи")}><span>✓</span><div><strong>Задачи</strong><small>{tasks.filter(task=>!task.done&&!task.archived).length} в работе</small></div><b>→</b></button><button type="button" onClick={()=>navigate("Привычки")}><span>↗</span><div><strong>Привычки</strong><small>{habits.filter(habit=>habit.checks[today]).length}/{habits.length} сегодня</small></div><b>→</b></button></div>
     </section>
-    <details className="dashboard-layout-menu"><summary>Настроить главную</summary><div className="dashboard-controls"><div><span className="eyebrow">РАСПОЛОЖЕНИЕ</span><strong>{editing?"Перетащите блоки в удобном порядке":"Сделайте главную удобной именно для себя"}</strong></div><div>{editing&&<button type="button" onClick={()=>setOrder(defaultDashboardOrder)}>Сбросить</button>}<button type="button" className={editing?"active":""} onClick={()=>setEditing(value=>!value)}>{editing?"✓ Готово":"Изменить порядок"}</button></div></div></details>
-    <div className={`dashboard-board ${editing?"editing":""}`}>{order.map((id,index)=><div id={id==="game"?"nexus-game":undefined} data-dashboard-widget={id} draggable={editing} onDragStart={event=>{setDragging(id);event.dataTransfer.effectAllowed="move";event.dataTransfer.setData("text/nexus-dashboard",id)}} onDragEnd={()=>setDragging(null)} onDragOver={event=>{if(editing)event.preventDefault()}} onDrop={event=>{event.preventDefault();const source=event.dataTransfer.getData("text/nexus-dashboard") as DashboardBlockId;if(source)moveBlock(source,id);setDragging(null)}} className={`dashboard-widget ${spans[id]} ${dragging===id||pointerDragging===id?"dragging":""}`} key={id}>{editing&&<div className="widget-order-controls"><button type="button" className="widget-drag-handle" aria-label={`Перетащить блок ${gameBlockLabels[id]}`} onPointerDown={event=>startPointer(event,id)} onPointerUp={finishPointer} onPointerCancel={()=>setPointerDragging(null)}>⠿ <span>{gameBlockLabels[id]}</span></button><button type="button" disabled={index===0} onClick={()=>shiftBlock(id,-1)} aria-label="Переместить выше">↑</button><button type="button" disabled={index===order.length-1} onClick={()=>shiftBlock(id,1)} aria-label="Переместить ниже">↓</button></div>}{blocks[id]}</div>)}</div>
+    <details className="dashboard-modules"><summary><span><strong>Остальные модули</strong><small>Цели, проекты, статистика и персональная настройка</small></span><b>Показать</b></summary><div className="dashboard-modules-body"><details className="dashboard-layout-menu"><summary>Настроить главную</summary><div className="dashboard-controls"><div><span className="eyebrow">РАСПОЛОЖЕНИЕ</span><strong>{editing?"Перетащите блоки в удобном порядке":"Сделайте главную удобной именно для себя"}</strong></div><div>{editing&&<button type="button" onClick={()=>setOrder(defaultDashboardOrder)}>Сбросить</button>}<button type="button" className={editing?"active":""} onClick={()=>setEditing(value=>!value)}>{editing?"✓ Готово":"Изменить порядок"}</button></div></div></details>
+    <div className={`dashboard-board ${editing?"editing":""}`}>{order.map((id,index)=><div id={id==="game"?"nexus-game":undefined} data-dashboard-widget={id} draggable={editing} onDragStart={event=>{setDragging(id);event.dataTransfer.effectAllowed="move";event.dataTransfer.setData("text/nexus-dashboard",id)}} onDragEnd={()=>setDragging(null)} onDragOver={event=>{if(editing)event.preventDefault()}} onDrop={event=>{event.preventDefault();const source=event.dataTransfer.getData("text/nexus-dashboard") as DashboardBlockId;if(source)moveBlock(source,id);setDragging(null)}} className={`dashboard-widget ${spans[id]} ${dragging===id||pointerDragging===id?"dragging":""}`} key={id}>{editing&&<div className="widget-order-controls"><button type="button" className="widget-drag-handle" aria-label={`Перетащить блок ${gameBlockLabels[id]}`} onPointerDown={event=>startPointer(event,id)} onPointerUp={finishPointer} onPointerCancel={()=>setPointerDragging(null)}>⠿ <span>{gameBlockLabels[id]}</span></button><button type="button" disabled={index===0} onClick={()=>shiftBlock(id,-1)} aria-label="Переместить выше">↑</button><button type="button" disabled={index===order.length-1} onClick={()=>shiftBlock(id,1)} aria-label="Переместить ниже">↓</button></div>}{blocks[id]}</div>)}</div></div></details>
   </>;
+}
+
+const agenticSkillLabels:Record<AgenticSkill,string>={morning:"Утро",evening:"Вечер",weekly:"Неделя",finance:"Финансы",goals:"Цели"};
+
+function AgenticCommandCenter({brief,busy,suggestions,memory,actionLog,links,routineRuns,navigate,onRunSkill,onAccept,onDismiss,onAsk,onEvaluateMemory}:{brief:AgenticBrief;busy:boolean;suggestions:AgentSuggestion[];memory:AgentMemory[];actionLog:AgentActionLog[];links:EntityLink[];routineRuns:RoutineRun[];navigate:(section:Section)=>void;onRunSkill:(skill:AgenticSkill)=>void;onAccept:(id:string)=>void;onDismiss:(id:string)=>void;onAsk:(id:string)=>void;onEvaluateMemory:(id:string,status:"saved"|"discarded")=>void}){
+  const suggestion=suggestions[0];
+  const candidates=memory.filter(item=>item.status==="candidate").slice(0,3);
+  return <section className="agentic-command-center" aria-label="Умный центр дня">
+    <header className="agentic-head"><div><span className="agentic-orb">✦</span><div><span className="eyebrow">DAILY OPERATOR</span><h2>Умный центр дня</h2><p>{brief.summary}</p></div></div><button type="button" onClick={()=>onRunSkill("morning")} disabled={busy}>{busy?"Анализирую…":"Обновить"}</button></header>
+    <div className="agentic-state" aria-label="Состояние сегодня"><div><small>СОН</small><strong>{brief.state.sleep}</strong></div><div><small>ЭНЕРГИЯ</small><strong>{brief.state.energy}</strong></div><div><small>НАСТРОЕНИЕ</small><strong>{brief.state.mood}</strong></div></div>
+    <div className="agentic-grid">
+      <div className="agentic-column"><span className="eyebrow">ТРЕБУЕТ ВНИМАНИЯ</span><div className="agentic-attention-list">{brief.attention.slice(0,5).map(item=><button type="button" className={`tone-${item.tone}`} onClick={()=>navigate(item.section)} key={item.id}><i/><span><strong>{item.title}</strong><small>{item.reason}</small></span><b>→</b></button>)}</div></div>
+      <div className="agentic-column"><span className="eyebrow">TOP 3 НА СЕГОДНЯ</span><div className="agentic-top3">{brief.top3.length?brief.top3.map((item,index)=><button type="button" onClick={()=>navigate("Задачи")} key={item.id}><i>{index+1}</i><span><strong>{item.title}</strong><small>{item.reason}</small></span><b>→</b></button>):<button type="button" onClick={()=>navigate("Задачи")}><i>✓</i><span><strong>Открытых задач нет</strong><small>Можно выбрать следующий результат</small></span><b>→</b></button>}</div></div>
+    </div>
+    <div className="agentic-insight"><span>↗</span><div><small>ОДИН ИНСАЙТ</small><strong>{brief.insight.title}</strong><p>{brief.insight.body}</p>{brief.insight.possiblePattern&&<em>{brief.insight.evidenceCount} наблюдений · уверенность {brief.insight.confidence}% · возможная закономерность</em>}</div></div>
+    {suggestion&&<div className="agentic-suggestion"><div><small>ПРЕДЛОЖЕНИЕ · ИЗМЕНЕНИЯ ТОЛЬКО ПОСЛЕ ВАШЕГО РЕШЕНИЯ</small><strong>{suggestion.title}</strong><p>{suggestion.reason}</p>{suggestion.evidence&&<em>Основание: {suggestion.evidence}</em>}</div><div className="agentic-actions"><button type="button" className="primary" onClick={()=>onAccept(suggestion.id)}>Принять · {suggestion.action.label}</button><button type="button" onClick={()=>onAsk(suggestion.id)}>Спросить AI</button><button type="button" onClick={()=>onDismiss(suggestion.id)}>Отклонить</button></div></div>}
+    <details className="agentic-disclosure"><summary><span><strong>Навыки, память и прозрачность</strong><small>{memory.filter(item=>item.status==="saved").length} фактов памяти · {actionLog.length} действий в журнале</small></span><b>Открыть</b></summary><div className="agentic-disclosure-body">
+      <section><span className="eyebrow">НАВЫКИ ОПЕРАТОРА</span><div className="agentic-skill-grid">{(Object.keys(agenticSkillLabels) as AgenticSkill[]).map(skill=><button type="button" disabled={busy} onClick={()=>onRunSkill(skill)} key={skill}>{agenticSkillLabels[skill]}<small>{routineRuns.filter(run=>run.skill===skill).length} запусков</small></button>)}</div></section>
+      <section><span className="eyebrow">ПАМЯТЬ</span>{candidates.length?<div className="agentic-memory">{candidates.map(item=><article key={item.id}><p>{item.content}</p><small>{item.source} · релевантность {item.relevance}%</small><div><button type="button" onClick={()=>onEvaluateMemory(item.id,"saved")}>Сохранить</button><button type="button" onClick={()=>onEvaluateMemory(item.id,"discarded")}>Не запоминать</button></div></article>)}</div>:<p className="agentic-empty">Новых фактов для подтверждения нет. NEXUS не сохраняет выводы без достаточных наблюдений.</p>}</section>
+      <section><span className="eyebrow">ЖУРНАЛ ДЕЙСТВИЙ AI</span><div className="agentic-log">{actionLog.slice(0,8).map(item=><article key={item.id}><i className={`stage-${item.stage}`}/><div><strong>{item.title}</strong><small>{item.details} · {new Date(item.createdAt).toLocaleString("ru-RU")}</small></div></article>)}{!actionLog.length&&<p className="agentic-empty">AI ещё не менял систему.</p>}</div><p className="agentic-relations">Связей в контексте: {links.length}. AI использует связи задач, проектов и целей, но не меняет данные скрыто.</p></section>
+    </div></details>
+  </section>;
 }
 
 function CardHead({title,subtitle,action,onClick}:{title:string;subtitle:string;action?:string;onClick?:()=>void}){const smartInbox=title==="Входящие";return <div className="card-head"><div><h3>{smartInbox?"Умные Входящие":title}</h3><span>{smartInbox?"Запишите или продиктуйте мысль — NEXUS сам создаст задачу, проект или ресурс без лишних вопросов":subtitle}</span></div>{action&&<button type="button" onClick={onClick}>{action} →</button>}</div>}

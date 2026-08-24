@@ -587,3 +587,36 @@ test("starts with compact tasks, habits and a direct inbox capture", async () =>
   assert.match(ios, /\.dashboard-capture/);
   assert.match(ios, /\.dashboard-widget\.half \.smart-load/);
 });
+
+test("adds a transparent Daily Operator with shared memory and approval", async () => {
+  const [page, agentic, provider, route, ios, docs] = await Promise.all([
+    source("app/page.tsx"),
+    source("lib/agentic.ts"),
+    source("lib/agentic-provider.ts"),
+    source("app/api/agentic/route.ts"),
+    source("app/ios.css"),
+    source("docs/agentic-layer.md"),
+  ]);
+
+  assert.match(page, /function AgenticCommandCenter/);
+  assert.match(page, /ТРЕБУЕТ ВНИМАНИЯ/);
+  assert.match(page, /TOP 3 НА СЕГОДНЯ/);
+  assert.match(page, /Принять ·/);
+  assert.match(page, /action\.type === "organize_inbox"/);
+  assert.match(page, /ЖУРНАЛ ДЕЙСТВИЙ AI/);
+  assert.match(page, /agentMemory, agentSuggestions, agentActionLog, agentLinks, routineRuns, operatorBrief/);
+  assert.match(agentic, /export function buildAgenticContext/);
+  assert.match(agentic, /export function buildEntityLinks/);
+  assert.match(agentic, /possiblePattern/);
+  assert.match(agentic, /evidenceCount/);
+  assert.match(agentic, /type: "organize_inbox"/);
+  assert.match(provider, /interface AgenticProvider/);
+  assert.match(provider, /class RulesAgenticProvider/);
+  assert.match(provider, /class OpenAIAgenticProvider/);
+  assert.match(route, /createAgenticProvider/);
+  assert.match(ios, /Personal Agentic OS/);
+  assert.match(ios, /\.agentic-command-center/);
+  assert.match(ios, /\.dashboard-modules/);
+  assert.match(docs, /Миграция базы не нужна/);
+  assert.match(docs, /анализирует;/);
+});
