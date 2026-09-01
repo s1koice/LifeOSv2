@@ -220,13 +220,19 @@ test("adds automatic AI planning with undo and a month-end finance forecast", as
 });
 
 test("adds a universal quick capture, manual cloud controls and readable light mode", async () => {
-  const [page, ios] = await Promise.all([
+  const [page, capture, captureRoute, ios] = await Promise.all([
     source("app/page.tsx"),
+    source("app/capture/page.tsx"),
+    source("app/api/capture/route.ts"),
     source("app/ios.css"),
   ]);
 
   assert.match(page, /function QuickAddMenu/);
-  assert.match(page, /БЫСТРАЯ МЫСЛЬ ВО «ВХОДЯЩИЕ»/);
+  assert.match(capture, /Напишите мысль/);
+  assert.match(capture, /MediaRecorder/);
+  assert.match(capture, /accept="image\/\*"/);
+  assert.match(captureRoute, /uploadAttachment/);
+  assert.match(captureRoute, /inboxItems: \[item, \.\.\.inboxItems\]/);
   assert.match(page, /function syncNow/);
   assert.match(page, /function downloadBackup/);
   assert.match(page, /Синхронизировать сейчас/);
