@@ -16,6 +16,28 @@ const bucketName = "nexus-inbox";
 const allowedTypes = new Set(["image/jpeg", "image/png", "image/webp", "audio/webm", "audio/mp4", "audio/mpeg", "audio/ogg"]);
 const maxFileSize = 1_600_000;
 const maxTotalSize = 3_200_000;
+const primaryCloudOrigin = "https://life-o-sv2.vercel.app";
+
+async function forwardToPrimary(request: NextRequest) {
+  if (request.nextUrl.hostname === new URL(primaryCloudOrigin).hostname) {
+    return NextResponse.json({ error: "Облачные Входящие ещё не настроены" }, { status: 503 });
+  }
+  const target = new URL(`/api/capture${request.nextUrl.search}`, primaryCloudOrigin);
+  const contentType = request.headers.get("content-type");
+  const response = await fetch(target, {
+    method: request.method,
+    headers: contentType ? { "Content-Type": contentType } : undefined,
+    body: request.method === "GET" ? undefined : await request.arrayBuffer(),
+    cache: "no-store",
+  });
+  return new NextResponse(response.body, {
+    status: response.status,
+    headers: {
+      "Content-Type": response.headers.get("content-type") || "application/json; charset=utf-8",
+      "Cache-Control": response.headers.get("cache-control") || "no-store",
+    },
+  });
+}
 
 function allowCapture(request: NextRequest) {
   const key = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "local";
@@ -99,7 +121,7 @@ async function uploadAttachment(file: File): Promise<InboxAttachment> {
 export async function POST(request: NextRequest) {
   if (!allowCapture(request)) return NextResponse.json({ error: "Слишком много записей. Подождите минуту." }, { status: 429 });
   const { url, key } = supabaseServerConfig();
-  if (!url || !key) return NextResponse.json({ error: "Облачные Входящие ещё не настроены" }, { status: 503 });
+  if (!url || !key) return forwardToPrimary(request);
 
   const form = await request.formData().catch(() => null);
   if (!form) return NextResponse.json({ error: "Не удалось прочитать запись" }, { status: 400 });
@@ -146,7 +168,7 @@ export async function POST(request: NextRequest) {
 
 export async function GET(request: NextRequest) {
   const { url, key } = supabaseServerConfig();
-  if (!url || !key) return NextResponse.json({ error: "Облачные Входящие ещё не настроены" }, { status: 503 });
+  if (!url || !key) return forwardToPrimary(request);
   const path = request.nextUrl.searchParams.get("path") || "";
   if (!/^\d{4}-\d{2}-\d{2}\/[a-f0-9-]+\.[a-z0-9]+$/i.test(path)) return NextResponse.json({ error: "Некорректный файл" }, { status: 400 });
   try {

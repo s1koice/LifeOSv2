@@ -6,6 +6,24 @@ type CloudRow = { payload: Record<string, unknown>; updated_at: string };
 type SupabaseResult = { status: number; body: string };
 
 export const runtime = "nodejs";
+const primaryCloudOrigin = "https://life-o-sv2.vercel.app";
+
+async function forwardToPrimary(request: Request) {
+  const sourceUrl = new URL(request.url);
+  if (sourceUrl.hostname === new URL(primaryCloudOrigin).hostname) {
+    return NextResponse.json({ error: "Облачное сохранение не настроено" }, { status: 503 });
+  }
+  const response = await fetch(new URL("/api/cloud/state", primaryCloudOrigin), {
+    method: request.method,
+    headers: request.method === "PUT" ? { "Content-Type": "application/json" } : undefined,
+    body: request.method === "PUT" ? await request.text() : undefined,
+    cache: "no-store",
+  });
+  return new NextResponse(response.body, {
+    status: response.status,
+    headers: { "Content-Type": response.headers.get("content-type") || "application/json; charset=utf-8", "Cache-Control": "no-store" },
+  });
+}
 
 function safeErrorMessage(error: unknown, fallback: string) {
   if (error && typeof error === "object" && "message" in error && typeof error.message === "string") {
@@ -71,8 +89,9 @@ async function authorize() {
   return null;
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
+    if (!cloudStorageConfigured()) return forwardToPrimary(request);
     const denied = await authorize();
     if (denied) return denied;
     const response = await supabaseRequest("rest/v1/nexus_pin_state?owner=eq.primary&select=payload,updated_at&limit=1");
@@ -88,6 +107,7 @@ export async function GET() {
 
 export async function PUT(request: Request) {
   try {
+    if (!cloudStorageConfigured()) return forwardToPrimary(request);
     const denied = await authorize();
     if (denied) return denied;
     const payload = await request.json().catch(() => null) as Record<string, unknown> | null;
