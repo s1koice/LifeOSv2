@@ -1,6 +1,6 @@
 import { request as httpsRequest } from "node:https";
 import { NextRequest, NextResponse } from "next/server";
-import { supabaseServerConfig } from "@/lib/pin-auth-server";
+import { supabaseServerConfig } from "@/lib/cloud-server";
 
 type CloudRow = { payload: Record<string, unknown>; updated_at: string };
 type InboxItem = { id: number; title: string; kind: "note"; createdAt: string; status: "new" };

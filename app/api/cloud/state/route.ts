@@ -1,6 +1,6 @@
 import { request as httpsRequest } from "node:https";
 import { NextResponse } from "next/server";
-import { hasPinSession, pinAuthConfigured, supabaseServerConfig } from "@/lib/pin-auth-server";
+import { cloudStorageConfigured, supabaseServerConfig } from "@/lib/cloud-server";
 
 type CloudRow = { payload: Record<string, unknown>; updated_at: string };
 type SupabaseResult = { status: number; body: string };
@@ -67,8 +67,7 @@ function serverHeaders(prefer?: string) {
 }
 
 async function authorize() {
-  if (!pinAuthConfigured()) return NextResponse.json({ error: "Облачное сохранение не настроено" }, { status: 503 });
-  if (!await hasPinSession()) return NextResponse.json({ error: "Требуется PIN-код" }, { status: 401 });
+  if (!cloudStorageConfigured()) return NextResponse.json({ error: "Облачное сохранение не настроено" }, { status: 503 });
   return null;
 }
 

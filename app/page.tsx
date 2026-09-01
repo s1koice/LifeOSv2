@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { loadPinCloudState, readPinSession, savePinCloudState, signInWithPin, signOutPin, type PinSession } from "@/lib/pin-cloud";
+import { loadCloudState, saveCloudState } from "@/lib/cloud-client";
 import { parseBankFiles, type BankImportRecord } from "@/lib/bank-import";
 import { buildAgenticContext, buildEntityLinks, runAgenticSkill, type AgentActionLog, type AgenticBrief, type AgenticSkill, type AgentMemory, type AgentSuggestion, type EntityLink, type RoutineRun } from "@/lib/agentic";
 
@@ -500,8 +500,6 @@ export default function Home() {
   const [focusTaskId, setFocusTaskId] = useState<number | null>(null);
   const [assistantOpen, setAssistantOpen] = useState(false);
   const [authOpen, setAuthOpen] = useState(false);
-  const [authSession, setAuthSession] = useState<PinSession | null>(null);
-  const [authChecked, setAuthChecked] = useState(false);
   const [syncStatus, setSyncStatus] = useState<SyncStatus>("local");
   const [syncError, setSyncError] = useState("");
   const [cloudReady, setCloudReady] = useState(false);
@@ -517,7 +515,6 @@ export default function Home() {
   const [loaded, setLoaded] = useState(false);
   const [, setClockTick] = useState(0);
   const gameSnapshotRef = useRef<GameSnapshot | null>(null);
-  const authSessionRef = useRef<PinSession | null>(null);
   const statePayloadRef = useRef<Record<string, unknown>>({});
   const lastCloudUpdatedRef = useRef("");
   const agenticRoutineStartingRef = useRef(false);
@@ -645,38 +642,22 @@ export default function Home() {
   useEffect(() => {
     if (!loaded) return;
     let cancelled = false;
-    readPinSession().then(result => {
-      if (cancelled) return;
-      const session = result.authenticated ? { authenticated: true } as PinSession : null;
-      authSessionRef.current = session;
-      setAuthSession(session);
-      setSyncStatus(session ? "loading" : "local");
-      if (!session) setAuthOpen(true);
-    }).catch(() => {
-      if (!cancelled) { setAuthSession(null); setSyncStatus("local"); setAuthOpen(true); }
-    }).finally(() => { if (!cancelled) setAuthChecked(true); });
-    return () => { cancelled = true; };
-  }, [loaded]);
-
-  useEffect(() => {
-    if (!loaded || !authSession?.authenticated) return;
-    let cancelled = false;
-    loadPinCloudState().then(async ({ row }) => {
+    loadCloudState().then(async ({ row }) => {
       if (cancelled) return;
       if (row?.payload) { gameSnapshotRef.current=null; applyStoredState(row.payload); }
-      else await savePinCloudState(statePayloadRef.current);
+      else await saveCloudState(statePayloadRef.current);
       if (cancelled) return;
       lastCloudUpdatedRef.current=row?.updated_at||new Date().toISOString();
       setCloudReady(true); setSyncError(""); setSyncStatus("synced"); setLastSyncedAt(new Date().toISOString());
     }).catch(error => { if (!cancelled) { setCloudReady(false); setSyncError(error instanceof Error?error.message:"Не удалось связаться с Supabase"); setSyncStatus("error"); } });
     return () => { cancelled = true; };
-  }, [loaded, authSession?.authenticated, applyStoredState]);
+  }, [loaded, applyStoredState]);
 
   useEffect(() => {
-    if (!loaded || !cloudReady || !authSessionRef.current) return;
+    if (!loaded || !cloudReady) return;
     const timer = window.setTimeout(() => {
       setSyncStatus("syncing");
-      savePinCloudState(statePayload).then(({ row }) => {
+      saveCloudState(statePayload).then(({ row }) => {
         const savedAt=row.updated_at||new Date().toISOString();lastCloudUpdatedRef.current=savedAt;setLastSyncedAt(savedAt);setSyncError("");setSyncStatus("synced");
       }).catch(error => {setSyncError(error instanceof Error?error.message:"Не удалось сохранить данные");setSyncStatus("error")});
     }, 900);
@@ -686,7 +667,7 @@ export default function Home() {
   useEffect(()=>{
     if(!loaded||!cloudReady)return;
     let cancelled=false;
-    const timer=window.setInterval(()=>{if(!authSessionRef.current)return;loadPinCloudState().then(({row})=>{if(cancelled)return;setSyncError("");if(row?.updated_at&&row.updated_at>lastCloudUpdatedRef.current){lastCloudUpdatedRef.current=row.updated_at;gameSnapshotRef.current=null;applyStoredState(row.payload);setLastSyncedAt(row.updated_at);setSyncStatus("synced")}}).catch(error=>{if(!cancelled){setSyncError(error instanceof Error?error.message:"Не удалось связаться с Supabase");setSyncStatus("error")}})},20_000);
+    const timer=window.setInterval(()=>{loadCloudState().then(({row})=>{if(cancelled)return;setSyncError("");if(row?.updated_at&&row.updated_at>lastCloudUpdatedRef.current){lastCloudUpdatedRef.current=row.updated_at;gameSnapshotRef.current=null;applyStoredState(row.payload);setLastSyncedAt(row.updated_at);setSyncStatus("synced")}}).catch(error=>{if(!cancelled){setSyncError(error instanceof Error?error.message:"Не удалось связаться с Supabase");setSyncStatus("error")}})},20_000);
     return()=>{cancelled=true;window.clearInterval(timer)};
   },[loaded,cloudReady,applyStoredState]);
 
@@ -809,10 +790,9 @@ export default function Home() {
   function navigate(next: Section) { setSection(next); window.history.pushState(null, "", `#${encodeURIComponent(next)}`); window.scrollTo({ top: 0, behavior: "smooth" }); }
   function notify(message: string) { setToast(message); window.setTimeout(() => setToast(""), 2600); }
   async function syncNow() {
-    if (!authSessionRef.current) { setAuthOpen(true); return; }
     setSyncStatus("syncing");
     try {
-      const { row } = await savePinCloudState(statePayloadRef.current);
+      const { row } = await saveCloudState(statePayloadRef.current);
       const savedAt = row.updated_at || new Date().toISOString();
       lastCloudUpdatedRef.current = savedAt; setCloudReady(true); setLastSyncedAt(savedAt); setSyncError(""); setSyncStatus("synced"); notify("Данные сохранены в облаке");
     } catch (error) {
@@ -831,7 +811,7 @@ export default function Home() {
       if(!candidate||typeof candidate!=="object"||!knownKeys.some(key=>key in candidate))throw new Error("Файл не похож на резервную копию NEXUS");
       if(!window.confirm("Заменить текущие данные содержимым резервной копии?"))return;
       applyStoredState(candidate);statePayloadRef.current=candidate;localStorage.setItem("nexus-state",JSON.stringify(candidate));
-      if(authSessionRef.current){setSyncStatus("syncing");const{row}=await savePinCloudState(candidate);const savedAt=row.updated_at||new Date().toISOString();lastCloudUpdatedRef.current=savedAt;setLastSyncedAt(savedAt);setCloudReady(true);setSyncStatus("synced");setSyncError("")}
+      setSyncStatus("syncing");const{row}=await saveCloudState(candidate);const savedAt=row.updated_at||new Date().toISOString();lastCloudUpdatedRef.current=savedAt;setLastSyncedAt(savedAt);setCloudReady(true);setSyncStatus("synced");setSyncError("");
       notify("Резервная копия восстановлена");setAuthOpen(false);
     }catch(error){setSyncError(error instanceof Error?error.message:"Не удалось восстановить данные");setSyncStatus("error")}
   }
@@ -855,13 +835,6 @@ export default function Home() {
       setInboxItems(current => [{ id: newEntityId(), title: clean, kind: hints?.kind || "note", createdAt: new Date().toISOString(), area: hints?.area || "Личное", status: "new" }, ...current]);
       notify("Запись сохранена — AI разберёт её позже");
     } finally { setSmartCaptureBusy(false); }
-  }
-  function acceptAuthSession(session: PinSession) {
-    authSessionRef.current = session; setAuthSession(session); setCloudReady(false); setSyncStatus("loading");
-  }
-  async function handleSignOut() {
-    await signOutPin();
-    authSessionRef.current = null; setAuthSession(null); setCloudReady(false); setSyncStatus("local"); setAuthOpen(true); notify("Система заблокирована");
   }
   function captureUndo(label: string) {
     setUndoStack(current => [{ id: newEntityId(), label, createdAt: new Date().toISOString(), tasks, projects, goals, habits, events, inboxItems, resources, accounts, transactions, budgetLines, loans }, ...current].slice(0, 10));
@@ -1060,12 +1033,12 @@ export default function Home() {
   }
 
   return <div className={`app-shell theme-${theme} text-${profile.textScale}`}>
-    <aside className={`sidebar ${mobileNav ? "open" : ""}`}><div className="brand"><span className="brand-mark">N</span><div><strong>NEXUS</strong><small>PERSONAL OS</small></div><button type="button" className="mobile-close" onClick={() => setMobileNav(false)}>×</button></div><nav>{nav.map(group => <div className="nav-group" key={group.group}><p>{group.group}</p>{group.items.map(item => <button type="button" key={item.label} className={section === item.label ? "active" : ""} onClick={() => { navigate(item.label); setMobileNav(false); }}><span>{item.icon}</span>{item.label}{item.label === "Задачи" && <em>{tasks.filter(t => !t.done).length}</em>}</button>)}</div>)}</nav><div className="sidebar-foot"><button type="button" className="level level-button" onClick={()=>{openGamification();setMobileNav(false)}}><div className="level-top"><span>Уровень {levelInfo.level}</span><b>{gamification.xp.toLocaleString("ru-RU")} XP</b></div><div className="mini-track"><i style={{ width: `${levelInfo.progress}%` }}/></div><small>{levelInfo.remaining} XP до нового уровня · серия {gameStreak(gamification.activeDays)} дн.</small></button><button type="button" className="profile profile-button" onClick={()=>{setAuthOpen(true);setMobileNav(false)}}><div className="avatar">{(profile.name.trim()[0]||"А").toUpperCase()}</div><div><strong>{profile.name}</strong><small>{authSession?syncStatus==="synced"?"Данные сохранены":"Синхронизация…":"Система заблокирована"}</small></div><span className={authSession&&syncStatus!=="error"?"online":"offline"}/></button></div></aside>
+    <aside className={`sidebar ${mobileNav ? "open" : ""}`}><div className="brand"><span className="brand-mark">N</span><div><strong>NEXUS</strong><small>PERSONAL OS</small></div><button type="button" className="mobile-close" onClick={() => setMobileNav(false)}>×</button></div><nav>{nav.map(group => <div className="nav-group" key={group.group}><p>{group.group}</p>{group.items.map(item => <button type="button" key={item.label} className={section === item.label ? "active" : ""} onClick={() => { navigate(item.label); setMobileNav(false); }}><span>{item.icon}</span>{item.label}{item.label === "Задачи" && <em>{tasks.filter(t => !t.done).length}</em>}</button>)}</div>)}</nav><div className="sidebar-foot"><button type="button" className="level level-button" onClick={()=>{openGamification();setMobileNav(false)}}><div className="level-top"><span>Уровень {levelInfo.level}</span><b>{gamification.xp.toLocaleString("ru-RU")} XP</b></div><div className="mini-track"><i style={{ width: `${levelInfo.progress}%` }}/></div><small>{levelInfo.remaining} XP до нового уровня · серия {gameStreak(gamification.activeDays)} дн.</small></button><button type="button" className="profile profile-button" onClick={()=>{setAuthOpen(true);setMobileNav(false)}}><div className="avatar">{(profile.name.trim()[0]||"А").toUpperCase()}</div><div><strong>{profile.name}</strong><small>{syncStatus==="synced"?"Данные сохранены":syncStatus==="error"?"Ошибка сохранения":"Синхронизация…"}</small></div><span className={syncStatus!=="error"?"online":"offline"}/></button></div></aside>
     {mobileNav && <button type="button" className="scrim" onClick={() => setMobileNav(false)} aria-label="Закрыть меню"/>}
-    <main className="main"><header><button type="button" className="menu-button" onClick={() => setMobileNav(true)}>☰</button><div className="breadcrumbs minimal-breadcrumbs"><button type="button" onClick={()=>navigate("Обзор")} aria-label="Перейти на главную страницу">⌂</button><strong>{section}</strong></div><div className="top-actions"><button type="button" className={`sync-pill ${syncStatus}`} onClick={()=>authSession?void syncNow():setAuthOpen(true)} title={authSession?"Сохранить данные сейчас":"Войти в систему"}><span>{syncStatus==="synced"?"✓":syncStatus==="error"?"!":authSession?"↻":"◌"}</span>{authSession?syncStatus==="synced"?"Сохранено":syncStatus==="error"?"Ошибка":"Сохраняю":"Войти"}</button><button type="button" className="search command-trigger" onClick={()=>setCommandOpen(true)}>⌕ <span>Поиск</span><kbd>⌘K</kbd></button><IconButton label="Уведомления" onClick={() => setNotificationsOpen(true)}>♢{notifications.length>0&&<b className="notification-count">{notifications.length}</b>}</IconButton><button type="button" className="assistant-mini" onClick={() => setAssistantOpen(true)}><span>✦</span> NEXUS</button></div></header><div className="page">{content()}</div></main>
+    <main className="main"><header><button type="button" className="menu-button" onClick={() => setMobileNav(true)}>☰</button><div className="breadcrumbs minimal-breadcrumbs"><button type="button" onClick={()=>navigate("Обзор")} aria-label="Перейти на главную страницу">⌂</button><strong>{section}</strong></div><div className="top-actions"><button type="button" className={`sync-pill ${syncStatus}`} onClick={()=>void syncNow()} title="Сохранить данные сейчас"><span>{syncStatus==="synced"?"✓":syncStatus==="error"?"!":"↻"}</span>{syncStatus==="synced"?"Сохранено":syncStatus==="error"?"Ошибка":"Сохраняю"}</button><button type="button" className="search command-trigger" onClick={()=>setCommandOpen(true)}>⌕ <span>Поиск</span><kbd>⌘K</kbd></button><IconButton label="Уведомления" onClick={() => setNotificationsOpen(true)}>♢{notifications.length>0&&<b className="notification-count">{notifications.length}</b>}</IconButton><button type="button" className="assistant-mini" onClick={() => setAssistantOpen(true)}><span>✦</span> NEXUS</button></div></header><div className="page">{content()}</div></main>
     <button type="button" className="ai-fab" onClick={() => setAssistantOpen(true)} aria-label="Открыть AI-ассистента"><span>✦</span><i/></button>
     {modalKind && <CreateModal kind={modalKind} accounts={accounts} projects={projects} goals={goals} areas={lifeAreas} categories={financeCategories} setCategories={setFinanceCategories} onRenameCategory={renameFinanceCategory} onDeleteCategory={deleteFinanceCategory} initialProjectId={taskProjectId} initialProject={editingProject} initialHabit={editingHabit} initialTask={editingTask} initialGoal={editingGoal} onClose={() => { setModalKind(null); setEditingHabit(null); setEditingTask(null); setEditingGoal(null); setEditingProject(null); setTaskProjectId(null); }} onCreate={draft => handleCreate(modalKind, draft)}/>} 
-    {authChecked&&authOpen&&<AuthPanel userName={profile.name} session={authSession} syncStatus={syncStatus} syncError={syncError} lastSyncedAt={lastSyncedAt} onSession={acceptAuthSession} onSignOut={handleSignOut} onSync={()=>void syncNow()} onBackup={downloadBackup} onRestore={file=>void restoreBackup(file)} onClose={()=>{if(authSession)setAuthOpen(false)}}/>} 
+    {authOpen&&<CloudPanel userName={profile.name} syncStatus={syncStatus} syncError={syncError} lastSyncedAt={lastSyncedAt} onSync={()=>void syncNow()} onBackup={downloadBackup} onRestore={file=>void restoreBackup(file)} onClose={()=>setAuthOpen(false)}/>}
     {quickAddOpen&&<QuickAddMenu onClose={()=>setQuickAddOpen(false)} onChoose={chooseQuickAdd} onInbox={captureInboxNote}/>} 
     {notificationsOpen&&<NotificationCenter items={notifications} onClose={()=>setNotificationsOpen(false)} onOpen={target=>{setNotificationsOpen(false);navigate(target)}}/>}
     {commandOpen&&<CommandMenu tasks={tasks} projects={projects} goals={goals} resources={resources} inboxItems={inboxItems} transactions={transactions} accounts={accounts} busy={agenticBusy} onClose={()=>setCommandOpen(false)} onNavigate={target=>{setCommandOpen(false);navigate(target)}} onCreate={kind=>{setCommandOpen(false);chooseQuickAdd(kind)}} onOpenTask={task=>{setCommandOpen(false);setEditingTask(task);setTaskProjectId(task.projectId||null);setModalKind("task")}} onRunSkill={skill=>{setCommandOpen(false);void runOperator(skill,"manual")}}/>}
@@ -1519,10 +1492,8 @@ function QuickAddMenu({onClose,onChoose,onInbox}:{onClose:()=>void;onChoose:(kin
   return <div className="modal-wrap quick-hub-wrap" onMouseDown={onClose}><section className="quick-modal quick-hub" onMouseDown={event=>event.stopPropagation()}><div><span className="eyebrow">БЫСТРО ДОБАВИТЬ</span><button type="button" onClick={onClose}>×</button></div><h2>Сохранить сейчас</h2><p>Мысль можно разобрать и дополнить позже.</p><form className="quick-inbox quick-inbox-primary" onSubmit={submit}><label><span>ВО ВХОДЯЩИЕ</span><input autoFocus value={note} onChange={event=>setNote(event.target.value)} placeholder="Задача, идея или заметка…"/></label><button type="submit" disabled={!note.trim()}>Сохранить</button></form><a className="iphone-capture-link" href="/capture"><span>◉</span><div><strong>Отдельный экран для iPhone</strong><small>Диктовка и сохранение одним касанием</small></div><b>›</b></a><div className="quick-section-label">СОЗДАТЬ С ДЕТАЛЯМИ</div><div className="quick-hub-grid quick-primary-grid">{primaryItems.map(itemButton)}</div><details className="quick-more-actions"><summary><span>Другие типы</span><b>{otherItems.length}</b></summary><div className="quick-hub-grid">{otherItems.map(itemButton)}</div></details></section></div>
 }
 
-function AuthPanel({userName,session,syncStatus,syncError,lastSyncedAt,onSession,onSignOut,onSync,onBackup,onRestore,onClose}:{userName:string;session:PinSession|null;syncStatus:SyncStatus;syncError:string;lastSyncedAt:string;onSession:(session:PinSession)=>void;onSignOut:()=>void;onSync:()=>void;onBackup:()=>void;onRestore:(file:File)=>void;onClose:()=>void}){
-  const[pin,setPin]=useState("");const[busy,setBusy]=useState(false);const[message,setMessage]=useState("");
-  async function submit(event:FormEvent){event.preventDefault();if(busy)return;setBusy(true);setMessage("");try{const next=await signInWithPin(pin);onSession(next);setMessage("Готово. Загружаю вашу систему…")}catch(error){setMessage(error instanceof Error?error.message:"Не удалось выполнить вход")}finally{setBusy(false)}}
-  return <div className="modal-wrap auth-wrap" onMouseDown={onClose}><section className="quick-modal auth-panel pin-panel" onMouseDown={event=>event.stopPropagation()}><div><span className="eyebrow">NEXUS · ЛИЧНЫЙ ДОСТУП</span>{session&&<button type="button" onClick={onClose}>×</button>}</div>{session?<><div className="auth-user"><span>{(userName.trim()[0]||"А").toUpperCase()}</span><div><small>ЛИЧНАЯ СИСТЕМА</small><h2>{userName}</h2></div></div><div className={`cloud-status ${syncStatus}`}><span>{syncStatus==="synced"?"✓":syncStatus==="error"?"!":"↻"}</span><div><strong>{syncStatus==="synced"?"Все изменения сохранены":syncStatus==="error"?"Не удалось сохранить данные":"Синхронизация…"}</strong><small>{syncStatus==="error"&&syncError?syncError:lastSyncedAt?`Последнее сохранение ${new Date(lastSyncedAt).toLocaleTimeString("ru-RU",{hour:"2-digit",minute:"2-digit"})}`:"Загружаем данные из Supabase"}</small></div></div><div className="cloud-policy"><strong>Одна система на всех устройствах</strong><p>После входа задачи, проекты, привычки, финансы и журнал автоматически загружаются и сохраняются в вашей личной записи.</p></div><div className="cloud-actions"><button type="button" onClick={onSync} disabled={syncStatus==="syncing"||syncStatus==="loading"}>↻ {syncStatus==="syncing"?"Сохраняю…":"Синхронизировать сейчас"}</button><button type="button" onClick={onBackup}>↓ Скачать резервную копию</button><label>↑ Восстановить из файла<input type="file" accept="application/json,.json" onChange={event=>{const file=event.target.files?.[0];if(file)onRestore(file);event.currentTarget.value=""}}/></label></div><button type="button" className="auth-signout" onClick={onSignOut}>Заблокировать систему</button></>:<><div className="auth-cloud-icon pin-lock">●</div><h2>Введите PIN-код</h2><p>Без почты, регистрации и лишних шагов. Один PIN открывает вашу личную систему.</p><form onSubmit={submit}><label className="modal-field pin-field"><span>PIN-код</span><input autoFocus type="password" inputMode="numeric" pattern="[0-9]*" minLength={4} maxLength={12} required autoComplete="current-password" value={pin} onChange={event=>setPin(event.target.value.replace(/\D/g,""))} placeholder="••••••"/></label>{message&&<p className="auth-message">{message}</p>}<button type="submit" className="primary modal-submit" disabled={busy||pin.length<4}>{busy?"Проверяю…":"Открыть NEXUS"}</button></form><small className="auth-note">PIN проверяется на сервере. Закрытый ключ базы данных никогда не передаётся в браузер.</small></>}</section></div>
+function CloudPanel({userName,syncStatus,syncError,lastSyncedAt,onSync,onBackup,onRestore,onClose}:{userName:string;syncStatus:SyncStatus;syncError:string;lastSyncedAt:string;onSync:()=>void;onBackup:()=>void;onRestore:(file:File)=>void;onClose:()=>void}){
+  return <div className="modal-wrap auth-wrap" onMouseDown={onClose}><section className="quick-modal auth-panel" onMouseDown={event=>event.stopPropagation()}><div><span className="eyebrow">NEXUS · ОБЛАЧНОЕ СОХРАНЕНИЕ</span><button type="button" onClick={onClose}>×</button></div><div className="auth-user"><span>{(userName.trim()[0]||"А").toUpperCase()}</span><div><small>ЛИЧНАЯ СИСТЕМА</small><h2>{userName}</h2></div></div><div className={`cloud-status ${syncStatus}`}><span>{syncStatus==="synced"?"✓":syncStatus==="error"?"!":"↻"}</span><div><strong>{syncStatus==="synced"?"Все изменения сохранены":syncStatus==="error"?"Не удалось сохранить данные":"Синхронизация…"}</strong><small>{syncStatus==="error"&&syncError?syncError:lastSyncedAt?`Последнее сохранение ${new Date(lastSyncedAt).toLocaleTimeString("ru-RU",{hour:"2-digit",minute:"2-digit"})}`:"Загружаем данные из Supabase"}</small></div></div><div className="cloud-policy"><strong>Без PIN-кода</strong><p>Сайт открывается сразу. Задачи, проекты, привычки, финансы и журнал автоматически загружаются и сохраняются в облаке.</p></div><div className="cloud-actions"><button type="button" onClick={onSync} disabled={syncStatus==="syncing"||syncStatus==="loading"}>↻ {syncStatus==="syncing"?"Сохраняю…":"Синхронизировать сейчас"}</button><button type="button" onClick={onBackup}>↓ Скачать резервную копию</button><label>↑ Восстановить из файла<input type="file" accept="application/json,.json" onChange={event=>{const file=event.target.files?.[0];if(file)onRestore(file);event.currentTarget.value=""}}/></label></div></section></div>
 }
 
 function ThemeSettings({theme,setTheme,notify}:{theme:Theme;setTheme:(theme:Theme)=>void;notify:(s:string)=>void}){return <div><span className="eyebrow">ВНЕШНИЙ ВИД</span><h2>Тема интерфейса</h2><p className="settings-copy">Выбор применяется сразу и сохраняется на этом устройстве.</p><div className="theme-grid"><button type="button" className={theme==="midnight"?"selected":""} onClick={()=>{setTheme("midnight");notify("Тема «Midnight» включена")}}><span className="theme-preview midnight-preview"><i/><i/><i/></span><strong>Midnight</strong><small>Новый тёмный iOS-дизайн</small></button><button type="button" className={theme==="lime"?"selected":""} onClick={()=>{setTheme("lime");notify("Тема «Фокус» включена")}}><span className="theme-preview lime-preview"><i/><i/><i/></span><strong>Фокус</strong><small>Графит и лаймовый акцент</small></button><button type="button" className={theme==="orbit"?"selected":""} onClick={()=>{setTheme("orbit");notify("Тема «Орбита» включена")}}><span className="theme-preview orbit-preview"><i/><i/><i/></span><strong>Орбита</strong><small>Премиальный чёрный и фиолетовый</small></button><button type="button" className={theme==="light"?"selected":""} onClick={()=>{setTheme("light");notify("Светлая тема iOS включена")}}><span className="theme-preview light-preview"><i/><i/><i/></span><strong>Светлая iOS</strong><small>Молочное стекло и системный синий</small></button></div></div>}
