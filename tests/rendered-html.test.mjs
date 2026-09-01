@@ -5,7 +5,8 @@ import test from "node:test";
 const root = new URL("../", import.meta.url);
 
 async function source(path) {
-  return readFile(new URL(path, root), "utf8");
+  const resolvedPath = path === "app/page.tsx" ? "app/nexus-app.tsx" : path;
+  return readFile(new URL(resolvedPath, root), "utf8");
 }
 
 test("contains the complete life-planning navigation and working create flows", async () => {
@@ -220,8 +221,9 @@ test("adds automatic AI planning with undo and a month-end finance forecast", as
 });
 
 test("adds a universal quick capture, manual cloud controls and readable light mode", async () => {
-  const [page, capture, captureRoute, ios] = await Promise.all([
+  const [page, rootPage, capture, captureRoute, ios] = await Promise.all([
     source("app/page.tsx"),
+    readFile(new URL("app/page.tsx", root), "utf8"),
     source("app/capture/page.tsx"),
     source("app/api/capture/route.ts"),
     source("app/ios.css"),
@@ -233,6 +235,7 @@ test("adds a universal quick capture, manual cloud controls and readable light m
   assert.match(capture, /accept="image\/\*"/);
   assert.match(captureRoute, /uploadAttachment/);
   assert.match(captureRoute, /inboxItems: \[item, \.\.\.inboxItems\]/);
+  assert.match(rootPage, /capture\/page/);
   assert.match(page, /function syncNow/);
   assert.match(page, /function downloadBackup/);
   assert.match(page, /Синхронизировать сейчас/);
