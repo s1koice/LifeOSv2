@@ -4,7 +4,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseServerConfig } from "@/lib/cloud-server";
 
 type CloudRow = { payload: Record<string, unknown>; updated_at: string };
-type InboxAttachment = { id: string; type: "image" | "audio"; name: string; mimeType: string; path: string; size: number };
+type InboxAttachment = { id: string; type: "image" | "audio"; name: string; mimeType: string; path?: string; dataUrl?: string; size: number };
 type InboxItem = { id: number; title: string; kind: "note"; createdAt: string; status: "new"; attachments?: InboxAttachment[] };
 type StoredInboxItem = Omit<InboxItem, "status"> & { status?: "new" | "organized" };
 type SupabaseResult = { status: number; body: string };
@@ -118,6 +118,19 @@ async function uploadAttachment(file: File): Promise<InboxAttachment> {
   return { id: randomUUID(), type, name: file.name.slice(0, 120), mimeType, path, size: file.size };
 }
 
+async function inlineAudioAttachment(file: File): Promise<InboxAttachment> {
+  const mimeType = file.type.toLowerCase().split(";")[0] || "audio/webm";
+  const bytes = Buffer.from(await file.arrayBuffer());
+  return {
+    id: randomUUID(),
+    type: "audio",
+    name: file.name.slice(0, 120),
+    mimeType,
+    dataUrl: `data:${mimeType};base64,${bytes.toString("base64")}`,
+    size: file.size,
+  };
+}
+
 export async function POST(request: NextRequest) {
   if (!allowCapture(request)) return NextResponse.json({ error: "Слишком много записей. Подождите минуту." }, { status: 429 });
   const { url, key } = supabaseServerConfig();
@@ -145,11 +158,14 @@ export async function POST(request: NextRequest) {
     const duplicate = !files.length && inboxItems.some(item => item.title.trim().toLowerCase() === title.toLowerCase() && Date.now() - new Date(item.createdAt).getTime() < 120_000);
     if (duplicate) return NextResponse.json({ saved: true, duplicate: true, count: inboxItems.filter(item => item.status !== "organized").length });
 
+    const imageFiles = files.filter(file => file.type.startsWith("image/"));
+    const audioFiles = files.filter(file => file.type.startsWith("audio/"));
     let attachments: InboxAttachment[] = [];
-    if (files.length) {
+    if (imageFiles.length) {
       await ensureBucket();
-      attachments = await Promise.all(files.map(uploadAttachment));
+      attachments = await Promise.all(imageFiles.map(uploadAttachment));
     }
+    if (audioFiles.length) attachments.push(...await Promise.all(audioFiles.map(inlineAudioAttachment)));
     const item: InboxItem = { id: Date.now() * 100 + Math.floor(Math.random() * 100), title, kind: "note", createdAt: new Date().toISOString(), status: "new", ...(attachments.length ? { attachments } : {}) };
     const nextPayload = { ...payload, inboxItems: [item, ...inboxItems] };
     const updatedAt = new Date().toISOString();

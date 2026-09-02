@@ -5,7 +5,7 @@ import { FormEvent, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import styles from "./capture.module.css";
 
-type InboxAttachment = { id: string; type: "image" | "audio"; name: string; mimeType: string; path: string; size: number };
+type InboxAttachment = { id: string; type: "image" | "audio"; name: string; mimeType: string; path?: string; dataUrl?: string; size: number };
 type InboxItem = { id: number; title: string; kind: "idea" | "task" | "note"; createdAt: string; status: "new" | "organized"; attachments?: InboxAttachment[] };
 type CaptureFile = { id: string; file: File; preview: string };
 
@@ -182,6 +182,6 @@ export default function CapturePage() {
       </div>
     </form>
     <div className={`${styles.feedback} ${message==="Сохранено"||message.includes("Уже")?styles.success:""}`} aria-live="polite">{message}</div>
-    <Link className={styles.siteLink} href="/#Проекты">Посмотреть Входящие{inboxCount ? ` · ${inboxCount}` : ""}</Link>
+    <Link className={styles.siteLink} href="/?workspace=inbox#Проекты">Посмотреть Входящие{inboxCount ? ` · ${inboxCount}` : ""}</Link>
   </main>;
 }
