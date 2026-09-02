@@ -1,1 +1,1 @@
-export { default } from "./capture/page";
+export { default } from "./nexus-app";

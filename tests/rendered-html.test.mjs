@@ -236,8 +236,8 @@ test("adds a universal quick capture, manual cloud controls and readable light m
   assert.match(captureRoute, /uploadAttachment/);
   assert.match(captureRoute, /inboxItems: \[item, \.\.\.inboxItems\]/);
   assert.match(captureRoute, /forwardToPrimary/);
-  assert.match(capture, /\/nexus#Проекты/);
-  assert.match(rootPage, /capture\/page/);
+  assert.match(capture, /\/#Проекты/);
+  assert.match(rootPage, /nexus-app/);
   assert.match(page, /function syncNow/);
   assert.match(page, /function downloadBackup/);
   assert.match(page, /Синхронизировать сейчас/);

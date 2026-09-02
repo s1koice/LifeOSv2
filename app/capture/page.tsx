@@ -182,6 +182,6 @@ export default function CapturePage() {
       </div>
     </form>
     <div className={`${styles.feedback} ${message==="Сохранено"||message.includes("Уже")?styles.success:""}`} aria-live="polite">{message}</div>
-    <Link className={styles.siteLink} href="/nexus#Проекты">Посмотреть Входящие{inboxCount ? ` · ${inboxCount}` : ""}</Link>
+    <Link className={styles.siteLink} href="/#Проекты">Посмотреть Входящие{inboxCount ? ` · ${inboxCount}` : ""}</Link>
   </main>;
 }
