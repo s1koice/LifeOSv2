@@ -1,0 +1,111 @@
+/* Working surfaces: readable content, quiet chrome, progressive disclosure. */
+.app-shell {
+  --ui-body: 1rem;
+  --ui-label: .875rem;
+  --ui-title: 1.125rem;
+  font-size: var(--ui-body);
+}
+.app-shell.text-extra { --ui-body: 1.125rem; --ui-label: 1rem; --ui-title: 1.25rem; }
+.app-shell.theme-light { --muted: #60616b; }
+.app-shell.theme-midnight { --muted: #b0b0b6; }
+.app-shell button, .app-shell input, .app-shell select, .app-shell textarea { font-family: inherit; }
+.app-shell :is(button,a,input,select,textarea,summary):focus-visible { outline: 3px solid var(--blue); outline-offset: 3px; }
+.app-shell .page { max-width: 1600px; margin-inline: auto; padding: 24px 28px 100px; }
+.app-shell .main > header { min-height: 64px; height: auto; padding-block: 10px; }
+.app-shell .nav-group button { min-height: 48px; font-size: var(--ui-body); line-height: 1.35; }
+.app-shell .minimal-breadcrumbs strong, .app-shell .sync-pill, .app-shell .command-trigger { font-size: var(--ui-label); }
+.app-shell .page-title { margin-bottom: 20px; align-items: center; gap: 16px; }
+.app-shell .page-title h1 { font-size: clamp(1.6rem, 2.5vw, 2.1rem); line-height: 1.2; margin: 0; letter-spacing: -.035em; }
+.app-shell .page-title .eyebrow { font-size: .875rem; letter-spacing: .1em; margin-bottom: 8px; }
+.app-shell .page-title p { font-size: var(--ui-body); line-height: 1.5; max-width: 65ch; margin: 8px 0 0; }
+.app-shell .page-actions:empty { display: none; }
+.app-shell .primary, .app-shell .secondary-action { min-height: 44px; height: auto; font-size: var(--ui-label); padding: 12px 18px; border-radius: 14px; }
+.app-shell .card { border-radius: 20px; }
+.app-shell .card-head h3 { font-size: var(--ui-title); line-height: 1.35; }
+.app-shell .card-head p, .app-shell .card-head button, .app-shell .empty-copy { font-size: var(--ui-label); line-height: 1.5; }
+.app-shell .card-head p:empty { display: none; }
+.app-shell .workspace-navigation { display: flex; gap: 8px; margin: 0 0 18px; padding: 0; flex-wrap: wrap; overflow: visible; }
+.app-shell .workspace-navigation > button { min-height: 46px; padding: 10px 16px; font-size: var(--ui-body); display: inline-flex; align-items: center; gap: 10px; border-radius: 13px; background: transparent; color: var(--muted); border: 1px solid transparent; }
+.app-shell .workspace-navigation > button.active { background: color-mix(in srgb,var(--blue) 10%,var(--panel)); border-color: color-mix(in srgb,var(--blue) 30%,var(--line)); color: var(--blue); }
+.app-shell .workspace-navigation b { font-size: var(--ui-label); font-weight: 600; }
+.app-shell .workspace-navigation select { margin-left: auto; max-width: 190px; min-height: 44px; padding: 8px 12px; font-size: var(--ui-label); background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 12px; }
+.app-shell .task-workspace .full-card { padding: 0 20px; overflow: visible; }
+.app-shell .task-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 16px 0; }
+.app-shell .task-status-filter { display: flex; padding: 3px; background: var(--panel2); border: 1px solid var(--line); border-radius: 12px; margin-right: auto; }
+.app-shell .task-status-filter button { min-height: 40px; padding: 8px 13px; border: 0; border-radius: 9px; color: var(--muted); background: transparent; font-size: var(--ui-label); }
+.app-shell .task-status-filter button.active { color: var(--text); background: var(--panel); box-shadow: 0 1px 4px #00000014; }
+.app-shell .task-toolbar > select { min-width: 0; max-width: 240px; min-height: 44px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); color: var(--text); font-size: var(--ui-label); }
+.app-shell .compact-task-row { display: grid; grid-template-columns: 44px minmax(0,1fr) 44px; align-items: start; gap: 10px; padding: 16px 0; min-height: 0; border-top: 1px solid var(--line); }
+.app-shell .compact-task-row .task-toggle { width: 44px; height: 44px; display: grid; place-items: center; margin: 0; }
+.app-shell .compact-task-row .task-toggle input { display: block; position: absolute; width: 1px; height: 1px; opacity: 0; }
+.app-shell .compact-task-row .task-toggle input:focus-visible + .check { outline: 3px solid var(--blue); outline-offset: 4px; }
+.app-shell .compact-task-row .check { width: 26px; height: 26px; }
+.app-shell .task-title-button { display: block; border: 0; padding: 6px 0; background: transparent; color: var(--text); text-align: left; font-size: var(--ui-title); font-weight: 650; line-height: 1.4; overflow-wrap: anywhere; }
+.app-shell .task-title-button:hover { color: var(--blue); }
+.app-shell .compact-task-row.done .task-title-button { text-decoration: line-through; color: var(--muted); }
+.app-shell .task-body > small.task-essential-meta { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: var(--ui-label); line-height: 1.5; color: var(--muted); }
+.app-shell .task-essential-meta .task-overdue { color: #dc3c58; }
+.app-shell.theme-midnight .task-essential-meta .task-overdue { color: #ff8195; }
+.app-shell .task-edit-shortcut { min-height: 44px; width: 44px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel2); color: var(--muted); font-size: 1.25rem; }
+.app-shell .task-detail-disclosure { margin-top: 3px; }
+.app-shell .task-detail-disclosure > summary { width: fit-content; min-height: 36px; display: flex; align-items: center; gap: 7px; color: var(--muted); cursor: pointer; font-size: var(--ui-label); list-style: none; }
+.app-shell .task-detail-disclosure > summary::-webkit-details-marker { display: none; }
+.app-shell .task-detail-disclosure > summary::after { content: '+'; }
+.app-shell .task-detail-disclosure[open] > summary::after { content: '−'; }
+.app-shell .task-expanded-details { display: grid; gap: 8px; padding: 12px 0; color: var(--muted); font-size: var(--ui-label); line-height: 1.5; }
+.app-shell .task-expanded-details p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.app-shell .task-expanded-details > div { display: flex; flex-wrap: wrap; gap: 8px; }
+.app-shell .task-expanded-details button { min-height: 44px; border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; color: var(--text); background: var(--panel2); font-size: var(--ui-label); }
+.app-shell .task-expanded-details .task-delete { color: #dc3c58; }
+.app-shell .inbox-row { padding: 16px 0; gap: 14px; }
+.app-shell .inbox-row strong, .app-shell .project-info h3 { font-size: var(--ui-title); line-height: 1.4; overflow-wrap: anywhere; }
+.app-shell .inbox-row small, .app-shell .project-info p, .app-shell .project-info span { font-size: var(--ui-label); line-height: 1.5; }
+.app-shell .inbox-row button, .app-shell .inbox-capture button, .app-shell .project-actions button { min-height: 44px; font-size: var(--ui-label); }
+.app-shell .inbox-capture input, .app-shell .inbox-capture select { min-height: 48px; font-size: var(--ui-body); }
+.app-shell .minimal-today-hero { margin-bottom: 16px; }
+.app-shell .minimal-today-hero h1 { font-size: 2rem !important; }
+.app-shell .dashboard-capture input { font-size: var(--ui-body); }
+.app-shell .dashboard-capture > button { min-height: 44px; font-size: var(--ui-label); }
+.app-shell .dashboard-shortcuts strong { font-size: var(--ui-body); }
+.app-shell .dashboard-shortcuts small, .app-shell .minimal-day-progress small { font-size: var(--ui-label); }
+.app-shell .dashboard-widget .task-row strong, .app-shell .dashboard-widget .habit-row strong { font-size: var(--ui-body); }
+.app-shell .dashboard-widget .task-row small, .app-shell .dashboard-widget .habit-row small { font-size: var(--ui-label); }
+.app-shell .modal-field > span { font-size: var(--ui-label); }
+.app-shell .modal-field :is(input,select,textarea) { font-size: var(--ui-body); min-height: 46px; }
+.app-shell .empty-state strong, .app-shell .empty-state button { font-size: var(--ui-body); }
+.app-shell .empty-state button { min-height: 44px; }
+@media (max-width: 1000px) {
+  .app-shell .task-toolbar > select { flex: 1; max-width: none; }
+  .app-shell .task-status-filter { margin-right: 0; }
+}
+@media (max-width: 760px) {
+  .app-shell .page { padding: 18px 14px calc(100px + env(safe-area-inset-bottom)); }
+  .app-shell .page-title { align-items: stretch; gap: 14px; }
+  .app-shell .page-title h1 { font-size: 1.65rem; }
+  .app-shell .page-title .primary { width: auto; font-size: var(--ui-body); padding: 12px 16px; }
+  .app-shell .page-actions .primary { flex: 1; }
+  .app-shell .workspace-navigation { gap: 6px; }
+  .app-shell .workspace-navigation > button { flex: 1; justify-content: center; padding: 10px 8px; font-size: .875rem; gap: 6px; }
+  .app-shell .workspace-navigation > select { margin-left: 0; width: 100%; max-width: none; }
+  .app-shell .task-workspace .full-card { padding: 0 12px; }
+  .app-shell .task-toolbar { gap: 8px; }
+  .app-shell .task-status-filter { width: 100%; }
+  .app-shell .task-status-filter button { flex: 1; min-height: 44px; }
+  .app-shell .task-toolbar > select { width: calc(50% - 4px); font-size: .875rem; }
+  .app-shell .compact-task-row { grid-template-columns: 36px minmax(0,1fr); gap: 6px; padding: 12px 0; }
+  .app-shell .compact-task-row .task-toggle { width: 36px; }
+  .app-shell .task-edit-shortcut { display: none; }
+  .app-shell .task-title-button { font-size: var(--ui-title); }
+  .app-shell .task-detail-disclosure > summary { min-height: 44px; }
+  .app-shell .task-essential-meta { font-size: var(--ui-label); gap: 3px 10px; }
+  .app-shell .ios-tabbar > button { min-width: 0; min-height: 52px; }
+  .app-shell .ios-tabbar small { font-size: .75rem; }
+  .app-shell .inbox-capture { display: flex; flex-wrap: wrap; }
+  .app-shell .inbox-capture input { flex: 1 1 100%; min-width: 0; }
+  .app-shell .inbox-capture select { flex: 1; min-width: 0; max-width: 100%; }
+  .app-shell .inbox-capture button[type=submit] { flex: 1 1 100%; }
+  .app-shell .inbox-row > div:last-child { flex-wrap: wrap; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .app-shell *, .app-shell *::before, .app-shell *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; transition-duration: .01ms !important; }
+}
